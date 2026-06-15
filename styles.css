@@ -1754,3 +1754,217 @@ label {
     padding: 6px;
   }
 }
+
+.cover-gallery-panel {
+  margin-bottom: 16px;
+}
+
+.cover-gallery-hint {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.cover-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.cover-gallery-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.cover-gallery-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--blue);
+}
+
+.cover-gallery-item.no-cover {
+  opacity: 0.7;
+}
+
+.cover-gallery-item.no-cover:hover {
+  opacity: 1;
+}
+
+.cover-gallery-thumb {
+  width: 100%;
+  aspect-ratio: 1.45;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(49, 95, 134, 0.45), rgba(213, 162, 61, 0.38)),
+    #26313a;
+  display: grid;
+  place-items: center;
+}
+
+.cover-gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-gallery-placeholder {
+  color: white;
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.cover-gallery-info {
+  padding: 8px 10px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.cover-gallery-info strong {
+  font-size: 13px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cover-gallery-size {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(104, 112, 121, 0.08);
+}
+
+.cover-gallery-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px 10px;
+}
+
+.cover-gallery-actions button {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cover-gallery-replace {
+  background: rgba(49, 95, 134, 0.08);
+  border-color: rgba(49, 95, 134, 0.3);
+  color: var(--blue);
+}
+
+.cover-gallery-replace:hover {
+  background: rgba(49, 95, 134, 0.15);
+  border-color: var(--blue);
+}
+
+.cover-gallery-remove {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.cover-gallery-empty {
+  text-align: center;
+  padding: 24px 20px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .cover-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+
+  .cover-gallery-info strong {
+    font-size: 12px;
+  }
+
+  .cover-gallery-actions button {
+    font-size: 11px;
+    padding: 5px 6px;
+  }
+}
+
+.cover-storage-info {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 4px;
+  background: rgba(49, 95, 134, 0.04);
+}
+
+.cover-storage-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(104, 112, 121, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.cover-storage-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), var(--yellow));
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.cover-storage-fill[style*="width: 8"],
+.cover-storage-fill[style*="width: 9"],
+.cover-storage-fill[style*="width: 100"] {
+  background: linear-gradient(90deg, var(--yellow), var(--red));
+}
+
+.cover-storage-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.cover-compress-info {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(57, 116, 91, 0.08);
+  border: 1px solid rgba(57, 116, 91, 0.2);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 700;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.edit-cover-preview {
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(104, 112, 121, 0.04);
+  margin-top: 4px;
+}
+
+.edit-cover-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  object-fit: contain;
+}

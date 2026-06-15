@@ -205,6 +205,7 @@ const els = {
   editCoverInput: document.querySelector("#editCoverInput"),
   editCoverPreview: document.querySelector("#editCoverPreview"),
   editCoverPreviewImg: document.querySelector("#editCoverPreviewImg"),
+  editCoverCompressInfo: document.querySelector("#editCoverCompressInfo"),
   editForgesContainer: document.querySelector("#editForgesContainer"),
   editDisputesContainer: document.querySelector("#editDisputesContainer"),
   editSetupContainer: document.querySelector("#editSetupContainer"),
@@ -227,7 +228,10 @@ const els = {
   rulingDateInput: document.querySelector("#rulingDateInput"),
   rulingNotesInput: document.querySelector("#rulingNotesInput"),
   rulingCancelBtn: document.querySelector("#rulingCancelBtn"),
-  rulingSubmitBtn: document.querySelector("#rulingSubmitBtn")
+  rulingSubmitBtn: document.querySelector("#rulingSubmitBtn"),
+  coverGalleryGrid: document.querySelector("#coverGalleryGrid"),
+  coverGalleryCount: document.querySelector("#coverGalleryCount"),
+  coverGalleryFileInput: document.querySelector("#coverGalleryFileInput")
 };
 
 function loadState() {
@@ -943,6 +947,166 @@ function renderChecklist() {
   els.checklistView.classList.remove("hidden");
 }
 
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+}
+
+function estimateDataUrlSize(dataUrl) {
+  if (!dataUrl) return 0;
+  const base64 = dataUrl.split(",")[1] || "";
+  return Math.round((base64.length * 3) / 4);
+}
+
+const COMPRESS_CONFIG = {
+  maxWidth: 500,
+  maxHeight: 700,
+  quality: 0.72,
+  minQuality: 0.4,
+  targetSizeKB: 120
+};
+
+function compressImage(file, config = {}) {
+  return new Promise((resolve) => {
+    const opts = { ...COMPRESS_CONFIG, ...config };
+    const result = {
+      originalSize: file ? file.size : 0,
+      compressedSize: 0,
+      dataUrl: "",
+      ratio: 0
+    };
+
+    if (!file) {
+      resolve(result);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+
+        if (w > opts.maxWidth) {
+          h = Math.round((h * opts.maxWidth) / w);
+          w = opts.maxWidth;
+        }
+        if (h > opts.maxHeight) {
+          w = Math.round((w * opts.maxHeight) / h);
+          h = opts.maxHeight;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+
+        let currentQuality = opts.quality;
+        let dataUrl = canvas.toDataURL("image/jpeg", currentQuality);
+        let sizeKB = estimateDataUrlSize(dataUrl) / 1024;
+
+        while (sizeKB > opts.targetSizeKB && currentQuality > opts.minQuality) {
+          currentQuality = Math.max(opts.minQuality, currentQuality - 0.1);
+          dataUrl = canvas.toDataURL("image/jpeg", currentQuality);
+          sizeKB = estimateDataUrlSize(dataUrl) / 1024;
+        }
+
+        result.dataUrl = dataUrl;
+        result.compressedSize = estimateDataUrlSize(dataUrl);
+        result.ratio = result.originalSize > 0 ? (1 - result.compressedSize / result.originalSize) : 0;
+        resolve(result);
+      };
+      img.onerror = () => {
+        result.dataUrl = reader.result;
+        result.compressedSize = estimateDataUrlSize(reader.result);
+        result.ratio = 0;
+        resolve(result);
+      };
+      img.src = reader.result;
+    };
+    reader.onerror = () => resolve(result);
+    reader.readAsDataURL(file);
+  });
+}
+
+function getTotalStorageSize() {
+  const total = state.games.reduce((sum, g) => sum + estimateDataUrlSize(g.cover || ""), 0);
+  const allData = JSON.stringify(state);
+  return {
+    coversOnly: total,
+    totalApprox: new Blob([allData]).size
+  };
+}
+
+function renderCoverGallery() {
+  const gamesWithCover = state.games.filter((g) => g.cover);
+  const gamesWithoutCover = state.games.filter((g) => !g.cover);
+  const storage = getTotalStorageSize();
+  const lsLimit = 5 * 1024 * 1024;
+  const usagePercent = Math.min(100, Math.round((storage.totalApprox / lsLimit) * 100));
+  els.coverGalleryCount.textContent = `${gamesWithCover.length}/${state.games.length} 已设封面 · 封面共 ${formatSize(storage.coversOnly)}`;
+
+  let html = `
+    <div class="cover-storage-info">
+      <div class="cover-storage-bar">
+        <div class="cover-storage-fill" style="width: ${usagePercent}%"></div>
+      </div>
+      <div class="cover-storage-text">
+        <span>本地存储占用约 ${formatSize(storage.totalApprox)}</span>
+        <span>浏览器限制约 5MB（已用 ${usagePercent}%）</span>
+      </div>
+    </div>
+  `;
+
+  for (const game of gamesWithCover) {
+    const sizeBytes = estimateDataUrlSize(game.cover);
+    html += `
+      <div class="cover-gallery-item" data-game-id="${game.id}">
+        <div class="cover-gallery-thumb">
+          <img src="${game.cover}" alt="${escapeHtml(game.name)}封面" />
+        </div>
+        <div class="cover-gallery-info">
+          <strong>${escapeHtml(game.name)}</strong>
+          <span class="cover-gallery-size">${formatSize(sizeBytes)}</span>
+        </div>
+        <div class="cover-gallery-actions">
+          <button type="button" class="cover-gallery-replace" data-game-id="${game.id}" title="替换封面">替换</button>
+          <button type="button" class="cover-gallery-remove danger" data-game-id="${game.id}" title="移除封面">移除</button>
+        </div>
+      </div>
+    `;
+  }
+
+  for (const game of gamesWithoutCover) {
+    html += `
+      <div class="cover-gallery-item no-cover" data-game-id="${game.id}">
+        <div class="cover-gallery-thumb cover-gallery-placeholder">
+          <span>${escapeHtml(game.name.slice(0, 2))}</span>
+        </div>
+        <div class="cover-gallery-info">
+          <strong>${escapeHtml(game.name)}</strong>
+          <span class="cover-gallery-size">未设封面</span>
+        </div>
+        <div class="cover-gallery-actions">
+          <button type="button" class="cover-gallery-replace primary" data-game-id="${game.id}" title="上传封面">上传</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!html) {
+    html = `<p class="cover-gallery-empty">暂无桌游，先添加一个桌游吧。</p>`;
+  }
+
+  els.coverGalleryGrid.innerHTML = html;
+}
+
 function renderAll() {
   saveState();
   if (els.filterMustReview) {
@@ -951,7 +1115,39 @@ function renderAll() {
   renderSummary();
   renderList();
   renderDetail();
+  renderCoverGallery();
   renderChecklistGames();
+}
+
+function compressImage(file, maxWidth = 400, quality = 0.7) {
+  return new Promise((resolve) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+        if (w > maxWidth) {
+          h = Math.round((h * maxWidth) / w);
+          w = maxWidth;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => resolve(reader.result);
+      img.src = reader.result;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
 }
 
 function readFileAsDataUrl(file) {
@@ -971,7 +1167,8 @@ async function addGame(event) {
   event.preventDefault();
   const minPlayers = Number(els.minPlayersInput.value);
   const maxPlayers = Math.max(minPlayers, Number(els.maxPlayersInput.value));
-  const cover = await readFileAsDataUrl(els.coverInput.files[0]);
+  const compressResult = await compressImage(els.coverInput.files[0]);
+  const cover = compressResult.dataUrl || "";
   const disputes = normalizeRuleArray([]);
   const game = {
     id: crypto.randomUUID(),
@@ -999,6 +1196,13 @@ async function addGame(event) {
   els.gameForm.reset();
   setDefaultDate();
   renderAll();
+  if (compressResult.originalSize > 0) {
+    const saved = formatSize(compressResult.originalSize - compressResult.compressedSize);
+    const ratio = Math.round(compressResult.ratio * 100);
+    if (ratio > 10) {
+      showBackupMessage(`《${game.name}》已加入收藏，封面从 ${formatSize(compressResult.originalSize)} 压缩至 ${formatSize(compressResult.compressedSize)}，节省 ${saved}（${ratio}%）。`, "success");
+    }
+  }
 }
 
 function setDefaultDate() {
@@ -1172,6 +1376,80 @@ els.detailView.addEventListener("click", (event) => {
 
 setDefaultDate();
 renderAll();
+
+let coverGalleryReplaceGameId = "";
+
+els.coverGalleryGrid.addEventListener("click", (event) => {
+  const replaceBtn = event.target.closest(".cover-gallery-replace");
+  const removeBtn = event.target.closest(".cover-gallery-remove");
+
+  if (replaceBtn) {
+    coverGalleryReplaceGameId = replaceBtn.dataset.gameId;
+    els.coverGalleryFileInput.click();
+    return;
+  }
+
+  if (removeBtn) {
+    const gameId = removeBtn.dataset.gameId;
+    const game = state.games.find((g) => g.id === gameId);
+    if (!game) return;
+    showConfirm(
+      "移除封面",
+      `确定要移除《${game.name}》的封面吗？`,
+      () => {
+        game.cover = "";
+        saveState();
+        renderAll();
+        showBackupMessage(`已移除《${game.name}》的封面。`, "success");
+      }
+    );
+  }
+});
+
+els.coverGalleryFileInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file || !coverGalleryReplaceGameId) {
+    coverGalleryReplaceGameId = "";
+    els.coverGalleryFileInput.value = "";
+    return;
+  }
+  const game = state.games.find((g) => g.id === coverGalleryReplaceGameId);
+  coverGalleryReplaceGameId = "";
+  if (!game) {
+    els.coverGalleryFileInput.value = "";
+    return;
+  }
+  try {
+    const result = await compressImage(file);
+    if (!result.dataUrl) {
+      showBackupMessage("封面图片处理失败，请重试。", "error");
+      return;
+    }
+    const oldCoverSize = estimateDataUrlSize(game.cover || "");
+    game.cover = result.dataUrl;
+    saveState();
+    renderAll();
+    const ratio = Math.round(result.ratio * 100);
+    let msg = `《${game.name}》封面已更新。`;
+    if (result.originalSize > 0) {
+      msg += ` 原图 ${formatSize(result.originalSize)} → 压缩后 ${formatSize(result.compressedSize)}`;
+      if (ratio > 10) {
+        msg += `（节省 ${ratio}%）`;
+      }
+      if (oldCoverSize > 0) {
+        const diff = oldCoverSize - result.compressedSize;
+        if (diff > 0) {
+          msg += `，比旧封面又小了 ${formatSize(diff)}`;
+        }
+      }
+    }
+    showBackupMessage(msg, "success");
+  } catch {
+    showBackupMessage("封面图片处理失败，请重试。", "error");
+  } finally {
+    els.coverGalleryFileInput.value = "";
+  }
+});
 
 function showBackupMessage(message, type = "success") {
   els.backupMessage.textContent = message;
@@ -1809,12 +2087,17 @@ function openEditDialog() {
   els.editComplexityInput.value = game.complexity;
   els.editLastPlayedInput.value = game.lastPlayed;
   els.editCoverInput.value = "";
+  editSnapshot._pendingCover = "";
+  editSnapshot._pendingCompressResult = null;
 
   if (game.cover) {
     els.editCoverPreviewImg.src = game.cover;
     els.editCoverPreview.classList.remove("hidden");
+    const size = estimateDataUrlSize(game.cover);
+    els.editCoverCompressInfo.textContent = `当前封面：${formatSize(size)}`;
   } else {
     els.editCoverPreview.classList.add("hidden");
+    els.editCoverCompressInfo.textContent = "";
   }
 
   renderEditExpansionSelect();
@@ -1830,23 +2113,55 @@ function closeEditDialog() {
   els.editDialog.classList.add("hidden");
 }
 
-els.editCoverInput.addEventListener("change", (e) => {
+els.editCoverInput.addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) {
     if (editSnapshot && editSnapshot.cover) {
       els.editCoverPreviewImg.src = editSnapshot.cover;
       els.editCoverPreview.classList.remove("hidden");
+      const size = estimateDataUrlSize(editSnapshot.cover);
+      els.editCoverCompressInfo.textContent = `当前封面：${formatSize(size)}`;
     } else {
       els.editCoverPreview.classList.add("hidden");
+      els.editCoverCompressInfo.textContent = "";
+    }
+    if (editSnapshot) {
+      editSnapshot._pendingCover = "";
+      editSnapshot._pendingCompressResult = null;
     }
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
-    els.editCoverPreviewImg.src = reader.result;
-    els.editCoverPreview.classList.remove("hidden");
-  };
-  reader.readAsDataURL(file);
+  els.editCoverCompressInfo.textContent = "正在压缩处理...";
+  const result = await compressImage(file);
+  if (!result.dataUrl) {
+    els.editCoverCompressInfo.textContent = "图片处理失败，请更换图片。";
+    if (editSnapshot) {
+      editSnapshot._pendingCover = "";
+      editSnapshot._pendingCompressResult = null;
+    }
+    return;
+  }
+  els.editCoverPreviewImg.src = result.dataUrl;
+  els.editCoverPreview.classList.remove("hidden");
+  const ratio = Math.round(result.ratio * 100);
+  let info = `原图 ${formatSize(result.originalSize)} → 压缩后 ${formatSize(result.compressedSize)}`;
+  if (ratio > 10) {
+    info += `（节省 ${ratio}%，约 ${formatSize(result.originalSize - result.compressedSize)}）`;
+  }
+  if (editSnapshot && editSnapshot.cover) {
+    const oldSize = estimateDataUrlSize(editSnapshot.cover);
+    const diff = oldSize - result.compressedSize;
+    if (diff > 0) {
+      info += ` · 比旧封面小 ${formatSize(diff)}`;
+    } else if (diff < 0) {
+      info += ` · 比旧封面大 ${formatSize(-diff)}`;
+    }
+  }
+  els.editCoverCompressInfo.textContent = info;
+  if (editSnapshot) {
+    editSnapshot._pendingCover = result.dataUrl;
+    editSnapshot._pendingCompressResult = result;
+  }
 });
 
 els.editForm.addEventListener("click", (e) => {
@@ -1923,9 +2238,15 @@ els.editForm.addEventListener("submit", async (e) => {
   saveCurrentEditRulesToSnapshot();
 
   let cover = editSnapshot ? editSnapshot.cover : "";
-  const coverFile = els.editCoverInput.files[0];
-  if (coverFile) {
-    cover = await readFileAsDataUrl(coverFile);
+  let compressResult = editSnapshot ? editSnapshot._pendingCompressResult : null;
+  if (editSnapshot && editSnapshot._pendingCover) {
+    cover = editSnapshot._pendingCover;
+  } else {
+    const coverFile = els.editCoverInput.files[0];
+    if (coverFile) {
+      compressResult = await compressImage(coverFile);
+      cover = compressResult.dataUrl;
+    }
   }
 
   const gameIndex = state.games.findIndex((g) => g.id === (editSnapshot ? editSnapshot.id : state.selectedId));
@@ -1959,7 +2280,15 @@ els.editForm.addEventListener("submit", async (e) => {
 
   closeEditDialog();
   renderAll();
-  showBackupMessage(`《${name}》已更新。`, "success");
+  let msg = `《${name}》已更新。`;
+  if (compressResult && compressResult.originalSize > 0) {
+    const ratio = Math.round(compressResult.ratio * 100);
+    msg += ` 封面从 ${formatSize(compressResult.originalSize)} 压缩至 ${formatSize(compressResult.compressedSize)}`;
+    if (ratio > 10) {
+      msg += `（节省 ${ratio}%）`;
+    }
+  }
+  showBackupMessage(msg, "success");
 });
 
 els.detailView.addEventListener("click", (event) => {

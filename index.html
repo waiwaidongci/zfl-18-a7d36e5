@@ -82,6 +82,16 @@
         <div id="backupMessage" class="backup-message hidden"></div>
       </section>
 
+      <section class="cover-gallery-panel panel">
+        <div class="panel-head">
+          <h2>🖼️ 封面图库</h2>
+          <span id="coverGalleryCount"></span>
+        </div>
+        <div class="cover-gallery-hint">统一管理所有桌游封面，上传前自动压缩到适合本地存储的尺寸。</div>
+        <div id="coverGalleryGrid" class="cover-gallery-grid"></div>
+        <input id="coverGalleryFileInput" type="file" accept="image/*" hidden />
+      </section>
+
       <section class="checklist-panel panel">
         <div class="panel-head">
           <h2>🎉 聚会前复习清单</h2>
@@ -218,6 +228,7 @@
             </label>
             <div id="editCoverPreview" class="edit-cover-preview hidden">
               <img id="editCoverPreviewImg" alt="封面预览" />
+              <div id="editCoverCompressInfo" class="cover-compress-info"></div>
             </div>
 
             <div class="edit-expansion-switcher">
