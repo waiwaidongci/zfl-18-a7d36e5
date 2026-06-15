@@ -63,6 +63,28 @@
         </label>
       </section>
 
+      <section class="backup-panel">
+        <h2>数据备份与恢复</h2>
+        <div class="backup-actions">
+          <button id="exportBtn" type="button">导出 JSON</button>
+          <button id="importBtn" type="button">导入 JSON</button>
+          <input id="importFile" type="file" accept=".json,application/json" hidden />
+          <button id="resetBtn" type="button" class="danger">恢复默认示例数据</button>
+        </div>
+        <div id="backupMessage" class="backup-message hidden"></div>
+      </section>
+
+      <div id="confirmDialog" class="dialog-overlay hidden">
+        <div class="dialog">
+          <h3 id="confirmTitle">确认操作</h3>
+          <p id="confirmMessage">确定要执行此操作吗？</p>
+          <div class="dialog-actions">
+            <button id="confirmCancel" type="button">取消</button>
+            <button id="confirmOk" type="button" class="primary">确定</button>
+          </div>
+        </div>
+      </div>
+
       <section class="layout">
         <aside class="panel">
           <h2>新增桌游</h2>

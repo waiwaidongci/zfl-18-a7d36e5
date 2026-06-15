@@ -70,7 +70,17 @@ const els = {
   gameCount: document.querySelector("#gameCount"),
   ruleCount: document.querySelector("#ruleCount"),
   staleGame: document.querySelector("#staleGame"),
-  visibleCount: document.querySelector("#visibleCount")
+  visibleCount: document.querySelector("#visibleCount"),
+  exportBtn: document.querySelector("#exportBtn"),
+  importBtn: document.querySelector("#importBtn"),
+  importFile: document.querySelector("#importFile"),
+  resetBtn: document.querySelector("#resetBtn"),
+  backupMessage: document.querySelector("#backupMessage"),
+  confirmDialog: document.querySelector("#confirmDialog"),
+  confirmTitle: document.querySelector("#confirmTitle"),
+  confirmMessage: document.querySelector("#confirmMessage"),
+  confirmOk: document.querySelector("#confirmOk"),
+  confirmCancel: document.querySelector("#confirmCancel")
 };
 
 function loadState() {
@@ -334,3 +344,143 @@ els.detailView.addEventListener("click", (event) => {
 
 setDefaultDate();
 renderAll();
+
+function showBackupMessage(message, type = "success") {
+  els.backupMessage.textContent = message;
+  els.backupMessage.className = `backup-message ${type}`;
+  clearTimeout(showBackupMessage._timer);
+  showBackupMessage._timer = setTimeout(() => {
+    els.backupMessage.className = "backup-message hidden";
+  }, 4000);
+}
+
+let confirmCallback = null;
+
+function showConfirm(title, message, onConfirm) {
+  els.confirmTitle.textContent = title;
+  els.confirmMessage.textContent = message;
+  confirmCallback = onConfirm;
+  els.confirmDialog.classList.remove("hidden");
+}
+
+function hideConfirm() {
+  els.confirmDialog.classList.add("hidden");
+  confirmCallback = null;
+}
+
+els.confirmCancel.addEventListener("click", hideConfirm);
+els.confirmOk.addEventListener("click", () => {
+  if (confirmCallback) confirmCallback();
+  hideConfirm();
+});
+els.confirmDialog.addEventListener("click", (e) => {
+  if (e.target === els.confirmDialog) hideConfirm();
+});
+
+function exportData() {
+  const exportObj = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    games: state.games
+  };
+  const jsonStr = JSON.stringify(exportObj, null, 2);
+  const blob = new Blob([jsonStr], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `boardgame-backup-${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showBackupMessage(`已成功导出 ${state.games.length} 个桌游数据。`, "success");
+}
+
+function validateImportData(data) {
+  if (!data || typeof data !== "object") {
+    throw new Error("文件格式无效，无法解析为 JSON 对象。");
+  }
+  const games = Array.isArray(data.games) ? data.games : (Array.isArray(data) ? data : null);
+  if (!games) {
+    throw new Error("数据格式错误：未找到 games 数组。");
+  }
+  for (const game of games) {
+    if (!game || typeof game !== "object") {
+      throw new Error("数据格式错误：存在无效的游戏条目。");
+    }
+    if (typeof game.name !== "string" || !game.name.trim()) {
+      throw new Error("数据格式错误：游戏条目缺少名称字段。");
+    }
+  }
+  return games;
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("读取文件失败。"));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+async function handleImportFile(file) {
+  if (!file) return;
+  try {
+    const text = await readFileAsText(file);
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error("JSON 解析失败，请检查文件格式。");
+    }
+    const games = validateImportData(parsed);
+    showConfirm(
+      "确认导入数据",
+      `即将导入 ${games.length} 个桌游，这将覆盖当前的全部收藏数据，操作不可撤销。确定继续吗？`,
+      () => {
+        state.games = games.map((game) => ({
+          id: game.id || crypto.randomUUID(),
+          name: String(game.name || ""),
+          minPlayers: Number(game.minPlayers) || 2,
+          maxPlayers: Number(game.maxPlayers) || 4,
+          duration: Number(game.duration) || 60,
+          complexity: ["轻", "中", "重"].includes(game.complexity) ? game.complexity : "中",
+          lastPlayed: String(game.lastPlayed || new Date().toISOString().slice(0, 10)),
+          cover: String(game.cover || ""),
+          forgets: Array.isArray(game.forgets) ? game.forgets.map(String) : [],
+          disputes: Array.isArray(game.disputes) ? game.disputes.map(String) : [],
+          setup: Array.isArray(game.setup) ? game.setup.map(String) : [],
+          scoring: Array.isArray(game.scoring) ? game.scoring.map(String) : []
+        }));
+        state.selectedId = state.games[0]?.id || "";
+        renderAll();
+        showBackupMessage(`成功导入 ${state.games.length} 个桌游数据。`, "success");
+      }
+    );
+  } catch (err) {
+    showBackupMessage(`导入失败：${err.message}`, "error");
+  } finally {
+    els.importFile.value = "";
+  }
+}
+
+function resetToDefault() {
+  showConfirm(
+    "恢复默认示例数据",
+    "这将清除全部自定义数据并恢复到内置的三个示例桌游，操作不可撤销。确定继续吗？",
+    () => {
+      const fresh = structuredClone(defaultState);
+      state.games = fresh.games;
+      state.selectedId = state.games[0]?.id || "";
+      renderAll();
+      showBackupMessage("已恢复默认示例数据。", "success");
+    }
+  );
+}
+
+els.exportBtn.addEventListener("click", exportData);
+els.importBtn.addEventListener("click", () => els.importFile.click());
+els.importFile.addEventListener("change", (e) => handleImportFile(e.target.files[0]));
+els.resetBtn.addEventListener("click", resetToDefault);
