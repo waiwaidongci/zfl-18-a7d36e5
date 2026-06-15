@@ -1119,37 +1119,6 @@ function renderAll() {
   renderChecklistGames();
 }
 
-function compressImage(file, maxWidth = 400, quality = 0.7) {
-  return new Promise((resolve) => {
-    if (!file) {
-      resolve("");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let w = img.width;
-        let h = img.height;
-        if (w > maxWidth) {
-          h = Math.round((h * maxWidth) / w);
-          w = maxWidth;
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.onerror = () => resolve(reader.result);
-      img.src = reader.result;
-    };
-    reader.onerror = () => resolve("");
-    reader.readAsDataURL(file);
-  });
-}
-
 function readFileAsDataUrl(file) {
   return new Promise((resolve) => {
     if (!file) {
