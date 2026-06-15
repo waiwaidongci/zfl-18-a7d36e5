@@ -37,8 +37,26 @@ function ruleStatus(rule) {
   return typeof rule === "string" ? REVIEW_STATUS.UNMARKED : rule?.status ?? REVIEW_STATUS.UNMARKED;
 }
 
+function normalizeExpansion(exp) {
+  if (!exp || typeof exp !== "object") return null;
+  return {
+    id: exp.id || crypto.randomUUID(),
+    name: String(exp.name || ""),
+    forgets: normalizeRuleArray(exp.forgets),
+    disputes: normalizeRuleArray(exp.disputes),
+    setup: normalizeRuleArray(exp.setup),
+    scoring: normalizeRuleArray(exp.scoring)
+  };
+}
+
+function normalizeExpansionArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(normalizeExpansion).filter(Boolean);
+}
+
 const defaultState = {
   selectedId: "",
+  selectedExpansionId: "",
   selectedChecklistIds: [],
   checklistPlayerFilter: "all",
   filterMustReview: false,
@@ -56,7 +74,8 @@ const defaultState = {
       disputes: normalizeRuleArray(["事件顺序和玩家动作结算先后", "科技板是否能替代所有同类随从"]),
       setup: normalizeRuleArray(["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"]),
       scoring: normalizeRuleArray(["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"]),
-      loanRecords: []
+      loanRecords: [],
+      expansions: []
     },
     {
       id: crypto.randomUUID(),
@@ -71,7 +90,8 @@ const defaultState = {
       disputes: normalizeRuleArray(["被动充能是否能拒绝", "星球改造费用受哪些能力影响"]),
       setup: normalizeRuleArray(["随机终局计分板和回合得分板", "按种族设置起始资源和母星"]),
       scoring: normalizeRuleArray(["终局计分板", "科技轨排名", "联邦和建筑分"]),
-      loanRecords: []
+      loanRecords: [],
+      expansions: []
     },
     {
       id: crypto.randomUUID(),
@@ -86,7 +106,8 @@ const defaultState = {
       disputes: normalizeRuleArray(["同色砖放置限制是否看整面墙", "中央区起始玩家标记是否必须拿"]),
       setup: normalizeRuleArray(["按人数放工厂圆盘", "每个圆盘补4块砖"]),
       scoring: normalizeRuleArray(["横竖相邻即时分", "完整行列和颜色终局加分"]),
-      loanRecords: []
+      loanRecords: [],
+      expansions: []
     }
   ]
 };
@@ -160,7 +181,14 @@ const els = {
   editSetupContainer: document.querySelector("#editSetupContainer"),
   editScoringContainer: document.querySelector("#editScoringContainer"),
   editErrorMessage: document.querySelector("#editErrorMessage"),
-  editCancelBtn: document.querySelector("#editCancelBtn")
+  editCancelBtn: document.querySelector("#editCancelBtn"),
+  expansionDialog: document.querySelector("#expansionDialog"),
+  expansionDialogTitle: document.querySelector("#expansionDialogTitle"),
+  expansionList: document.querySelector("#expansionList"),
+  expansionNameInput: document.querySelector("#expansionNameInput"),
+  expansionAddBtn: document.querySelector("#expansionAddBtn"),
+  expansionCancelBtn: document.querySelector("#expansionCancelBtn"),
+  editExpansionSelect: document.querySelector("#editExpansionSelect")
 };
 
 function loadState() {
@@ -175,13 +203,15 @@ function loadState() {
           forgets: normalizeRuleArray(game.forgets),
           disputes: normalizeRuleArray(game.disputes),
           setup: normalizeRuleArray(game.setup),
-          scoring: normalizeRuleArray(game.scoring)
+          scoring: normalizeRuleArray(game.scoring),
+          expansions: normalizeExpansionArray(game.expansions)
         }))
       : structuredClone(defaultState).games;
     return {
       ...structuredClone(defaultState),
       ...parsed,
       games,
+      selectedExpansionId: parsed.selectedExpansionId || "",
       selectedChecklistIds: Array.isArray(parsed.selectedChecklistIds) ? parsed.selectedChecklistIds : [],
       checklistPlayerFilter: parsed.checklistPlayerFilter || "all",
       filterMustReview: parsed.filterMustReview || false
@@ -228,12 +258,40 @@ function daysSince(dateString) {
   return Math.max(0, Math.floor((today - date) / 86400000));
 }
 
-function getAllRules(game) {
-  return [...game.forgets, ...game.disputes, ...game.setup, ...game.scoring];
+function getExpansionById(game, expansionId) {
+  if (!game || !expansionId || !Array.isArray(game.expansions)) return null;
+  return game.expansions.find((e) => e.id === expansionId) || null;
+}
+
+function getCurrentExpansion(game) {
+  return getExpansionById(game, state.selectedExpansionId);
+}
+
+function getRuleContainer(game, expansionId) {
+  if (!game) return null;
+  if (!expansionId) return game;
+  return getExpansionById(game, expansionId);
+}
+
+function getCurrentRuleContainer(game) {
+  return getRuleContainer(game, state.selectedExpansionId);
+}
+
+function getAllRules(game, expansionId) {
+  const container = getRuleContainer(game, expansionId);
+  if (!container) return [];
+  return [...container.forgets, ...container.disputes, ...container.setup, ...container.scoring];
 }
 
 function getAllRuleObjects() {
-  return state.games.flatMap((game) => getAllRules(game));
+  const rules = [];
+  for (const game of state.games) {
+    rules.push(...getAllRules(game, ""));
+    for (const exp of game.expansions) {
+      rules.push(...getAllRules(game, exp.id));
+    }
+  }
+  return rules;
 }
 
 function countRulesByStatus(status) {
@@ -249,13 +307,19 @@ function getReviewPendingCount() {
 }
 
 function hasMustReviewRule(game) {
-  return getAllRules(game).some((rule) => ruleStatus(rule) === REVIEW_STATUS.MUST_REVIEW);
+  if (getAllRules(game, "").some((rule) => ruleStatus(rule) === REVIEW_STATUS.MUST_REVIEW)) return true;
+  for (const exp of game.expansions || []) {
+    if (getAllRules(game, exp.id).some((rule) => ruleStatus(rule) === REVIEW_STATUS.MUST_REVIEW)) return true;
+  }
+  return false;
 }
 
-function setRuleStatus(gameId, ruleKey, ruleIndex, status) {
+function setRuleStatus(gameId, ruleKey, ruleIndex, status, expansionId = "") {
   const game = state.games.find((g) => g.id === gameId);
   if (!game) return;
-  const rules = game[ruleKey];
+  const container = getRuleContainer(game, expansionId);
+  if (!container) return;
+  const rules = container[ruleKey];
   if (!rules || ruleIndex < 0 || ruleIndex >= rules.length) return;
   const currentStatus = ruleStatus(rules[ruleIndex]);
   if (currentStatus === status) {
@@ -266,8 +330,8 @@ function setRuleStatus(gameId, ruleKey, ruleIndex, status) {
   saveState();
 }
 
-function getReviewProgress(game) {
-  const all = getAllRules(game);
+function getReviewProgress(game, expansionId = "") {
+  const all = getAllRules(game, expansionId);
   if (all.length === 0) return { total: 0, mastered: 0, pending: 0, mustReview: 0 };
   const mastered = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.MASTERED).length;
   const mustReview = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW).length;
@@ -283,13 +347,23 @@ function getReviewProgress(game) {
   };
 }
 
+function getAllRulesIncludingExpansions(game) {
+  const rules = [...getAllRules(game, "")];
+  for (const exp of game.expansions || []) {
+    rules.push(...getAllRules(game, exp.id));
+  }
+  return rules;
+}
+
 function getFilteredGames() {
   const keyword = els.searchInput.value.trim();
   const player = els.playerFilter.value;
   const complexity = els.complexityFilter.value;
   const mustReviewOnly = els.filterMustReview && els.filterMustReview.checked;
   const games = state.games.filter((game) => {
-    const text = `${game.name}${getAllRules(game).map(ruleText).join("")}`;
+    const allRulesText = getAllRulesIncludingExpansions(game).map(ruleText).join("");
+    const expansionNames = (game.expansions || []).map((e) => e.name).join("");
+    const text = `${game.name}${expansionNames}${allRulesText}`;
     const matchesKeyword = !keyword || text.includes(keyword);
     const matchesPlayer = player === "all" || (Number(player) >= game.minPlayers && Number(player) <= game.maxPlayers);
     const matchesComplexity = complexity === "all" || game.complexity === complexity;
@@ -305,8 +379,25 @@ function getFilteredGames() {
   return games.sort((a, b) => daysSince(b.lastPlayed) - daysSince(a.lastPlayed));
 }
 
+function getTotalReviewProgress(game) {
+  const all = getAllRulesIncludingExpansions(game);
+  if (all.length === 0) return { total: 0, mastered: 0, pending: 0, mustReview: 0 };
+  const mastered = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.MASTERED).length;
+  const mustReview = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW).length;
+  const stillForget = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.STILL_FORGET).length;
+  const unmarked = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.UNMARKED).length;
+  return {
+    total: all.length,
+    mastered,
+    mustReview,
+    stillForget,
+    unmarked,
+    pending: stillForget + mustReview + unmarked
+  };
+}
+
 function renderSummary() {
-  const allRuleCount = state.games.reduce((sum, game) => sum + getAllRules(game).length, 0);
+  const allRuleCount = state.games.reduce((sum, game) => sum + getAllRulesIncludingExpansions(game).length, 0);
   const stale = [...state.games].sort((a, b) => daysSince(b.lastPlayed) - daysSince(a.lastPlayed))[0];
   els.gameCount.textContent = state.games.length;
   els.ruleCount.textContent = allRuleCount;
@@ -317,7 +408,7 @@ function renderSummary() {
 }
 
 function renderReviewProgressBadges(game) {
-  const progress = getReviewProgress(game);
+  const progress = getTotalReviewProgress(game);
   if (progress.total === 0) return "";
   const badges = [];
   if (progress.mustReview > 0) {
@@ -414,8 +505,8 @@ function renderLoanStatus(game) {
   `;
 }
 
-function renderReviewSummary(game) {
-  const progress = getReviewProgress(game);
+function renderReviewSummary(game, expansionId = "") {
+  const progress = getReviewProgress(game, expansionId);
   if (progress.total === 0) return "";
   return `
     <section class="review-summary">
@@ -449,6 +540,38 @@ function renderReviewSummary(game) {
   `;
 }
 
+function renderExpansionSwitcher(game) {
+  const expansions = game.expansions || [];
+  const hasExpansions = expansions.length > 0;
+  const currentExpansionId = state.selectedExpansionId || "";
+  const currentLabel = currentExpansionId
+    ? (expansions.find((e) => e.id === currentExpansionId)?.name || "基础游戏")
+    : "基础游戏";
+
+  return `
+    <section class="expansion-switcher">
+      <div class="expansion-switcher-header">
+        <h3>📦 内容选择</h3>
+        <button id="manageExpansionsBtn" type="button" class="text-btn">管理扩展包</button>
+      </div>
+      <div class="expansion-tabs">
+        <button type="button" class="expansion-tab ${!currentExpansionId ? "active" : ""}" data-expansion-id="">
+          基础游戏
+        </button>
+        ${expansions.map((exp) => `
+          <button type="button" class="expansion-tab ${exp.id === currentExpansionId ? "active" : ""}" data-expansion-id="${exp.id}">
+            ${escapeHtml(exp.name)}
+          </button>
+        `).join("")}
+      </div>
+      <div class="expansion-current-label">
+        当前查看：<strong>${escapeHtml(currentLabel)}</strong>
+        ${hasExpansions ? `<span class="expansion-count">共 ${expansions.length} 个扩展包</span>` : ""}
+      </div>
+    </section>
+  `;
+}
+
 function renderDetail() {
   const game = state.games.find((item) => item.id === state.selectedId) || state.games[0];
   if (!game) {
@@ -456,6 +579,13 @@ function renderDetail() {
     return;
   }
   state.selectedId = game.id;
+  
+  const currentExpansionId = state.selectedExpansionId || "";
+  const container = getRuleContainer(game, currentExpansionId);
+  const progress = getReviewProgress(game, currentExpansionId);
+  const currentExpansion = getCurrentExpansion(game);
+  const isBaseGame = !currentExpansionId;
+
   els.detailView.innerHTML = `
     <div class="quick-card">
       <div class="detail-cover">
@@ -470,12 +600,13 @@ function renderDetail() {
           <span class="pill">${daysSince(game.lastPlayed)}天未玩</span>
         </div>
       </div>
-      ${renderReviewSummary(game)}
+      ${renderExpansionSwitcher(game)}
+      ${renderReviewSummary(game, currentExpansionId)}
       ${renderLoanStatus(game)}
-      ${renderRuleSection("容易忘的规则", "forgets", game.forgets)}
-      ${renderRuleSection("常见争议", "disputes", game.disputes)}
-      ${renderRuleSection("开局准备", "setup", game.setup)}
-      ${renderRuleSection("计分提醒", "scoring", game.scoring)}
+      ${renderRuleSection("容易忘的规则", "forgets", container?.forgets || [], currentExpansionId)}
+      ${renderRuleSection("常见争议", "disputes", container?.disputes || [], currentExpansionId)}
+      ${renderRuleSection("开局准备", "setup", container?.setup || [], currentExpansionId)}
+      ${renderRuleSection("计分提醒", "scoring", container?.scoring || [], currentExpansionId)}
       <form class="add-rule" id="ruleForm">
         <select id="ruleTypeInput">
           <option value="forgets">容易忘的规则</option>
@@ -483,7 +614,7 @@ function renderDetail() {
           <option value="setup">开局准备</option>
           <option value="scoring">计分提醒</option>
         </select>
-        <textarea id="ruleTextInput" rows="3" placeholder="补充一条聚会前要看的提醒" required></textarea>
+        <textarea id="ruleTextInput" rows="3" placeholder="补充一条${isBaseGame ? "基础游戏" : escapeHtml(currentExpansion?.name || "扩展包")}的规则提醒" required></textarea>
         <button class="primary" type="submit">加入规则卡片</button>
       </form>
       <div class="detail-actions">
@@ -495,7 +626,7 @@ function renderDetail() {
   `;
 }
 
-function renderStatusButtons(gameId, ruleKey, ruleIndex, currentStatus) {
+function renderStatusButtons(gameId, ruleKey, ruleIndex, currentStatus, expansionId = "") {
   const statuses = [
     { value: REVIEW_STATUS.MASTERED, label: "已掌握", icon: "✅" },
     { value: REVIEW_STATUS.STILL_FORGET, label: "还会忘", icon: "💭" },
@@ -505,12 +636,12 @@ function renderStatusButtons(gameId, ruleKey, ruleIndex, currentStatus) {
     .map((s) => {
       const active = currentStatus === s.value ? "active" : "";
       return `<button type="button" class="status-btn ${active} ${s.value}" title="${s.label}" 
-        data-status="${s.value}" data-rule-game="${gameId}" data-rule-key="${ruleKey}" data-rule-index="${ruleIndex}">${s.icon}</button>`;
+        data-status="${s.value}" data-rule-game="${gameId}" data-rule-key="${ruleKey}" data-rule-index="${ruleIndex}" data-rule-expansion="${expansionId}">${s.icon}</button>`;
     })
     .join("");
 }
 
-function renderRuleSection(title, key, items) {
+function renderRuleSection(title, key, items, expansionId = "") {
   return `
     <section class="rule-section">
       <h3>${title}</h3>
@@ -529,8 +660,8 @@ function renderRuleSection(title, key, items) {
                     ${status ? `<span class="rule-status-label">${REVIEW_STATUS_LABELS[status]}</span>` : ""}
                   </div>
                   <div class="rule-actions">
-                    ${renderStatusButtons(state.selectedId, key, index, status)}
-                    <button type="button" class="delete-btn" title="删除" data-rule-key="${key}" data-rule-index="${index}">×</button>
+                    ${renderStatusButtons(state.selectedId, key, index, status, expansionId)}
+                    <button type="button" class="delete-btn" title="删除" data-rule-key="${key}" data-rule-index="${index}" data-rule-expansion="${expansionId}">×</button>
                   </div>
                 </li>
               `;
@@ -668,10 +799,12 @@ async function addGame(event) {
     disputes: normalizeRuleArray([]),
     setup: normalizeRuleArray(["整理组件并按人数调整初始设置。"]),
     scoring: normalizeRuleArray(["确认终局计分项和即时得分项。"]),
-    loanRecords: []
+    loanRecords: [],
+    expansions: []
   };
   state.games.unshift(game);
   state.selectedId = game.id;
+  state.selectedExpansionId = "";
   els.gameForm.reset();
   setDefaultDate();
   renderAll();
@@ -708,6 +841,7 @@ els.gameList.addEventListener("click", (event) => {
   const card = event.target.closest("[data-game-id]");
   if (!card) return;
   state.selectedId = card.dataset.gameId;
+  state.selectedExpansionId = "";
   renderAll();
 });
 
@@ -719,7 +853,9 @@ els.detailView.addEventListener("submit", (event) => {
   const key = document.querySelector("#ruleTypeInput").value;
   const text = document.querySelector("#ruleTextInput").value.trim();
   if (!text) return;
-  game[key].push(normalizeRule(text));
+  const container = getCurrentRuleContainer(game);
+  if (!container) return;
+  container[key].push(normalizeRule(text));
   renderAll();
 });
 
@@ -728,15 +864,30 @@ els.detailView.addEventListener("click", (event) => {
   const ruleButton = event.target.closest(".delete-btn[data-rule-key]");
   const playedButton = event.target.closest("#playedTodayBtn");
   const deleteButton = event.target.closest("#deleteGameBtn");
+  const editButton = event.target.closest("#editGameBtn");
+  const manageExpansionsBtn = event.target.closest("#manageExpansionsBtn");
+  const expansionTab = event.target.closest("[data-expansion-id]");
   const game = state.games.find((item) => item.id === state.selectedId);
   if (!game) return;
+
+  if (expansionTab) {
+    state.selectedExpansionId = expansionTab.dataset.expansionId || "";
+    renderAll();
+    return;
+  }
+
+  if (manageExpansionsBtn) {
+    openExpansionDialog();
+    return;
+  }
 
   if (statusButton) {
     const gameId = statusButton.dataset.ruleGame;
     const key = statusButton.dataset.ruleKey;
     const index = Number(statusButton.dataset.ruleIndex);
     const status = statusButton.dataset.status;
-    setRuleStatus(gameId, key, index, status);
+    const expansionId = statusButton.dataset.ruleExpansion || "";
+    setRuleStatus(gameId, key, index, status, expansionId);
     renderAll();
     return;
   }
@@ -744,7 +895,11 @@ els.detailView.addEventListener("click", (event) => {
   if (ruleButton) {
     const key = ruleButton.dataset.ruleKey;
     const index = Number(ruleButton.dataset.ruleIndex);
-    game[key].splice(index, 1);
+    const expansionId = ruleButton.dataset.ruleExpansion || "";
+    const container = getRuleContainer(game, expansionId);
+    if (container && container[key]) {
+      container[key].splice(index, 1);
+    }
     renderAll();
   }
 
@@ -756,11 +911,16 @@ els.detailView.addEventListener("click", (event) => {
   if (deleteButton) {
     state.games = state.games.filter((item) => item.id !== game.id);
     state.selectedId = state.games[0]?.id || "";
+    state.selectedExpansionId = "";
     syncChecklistSelection();
     if (!els.checklistView.classList.contains("hidden")) {
       renderChecklist();
     }
     renderAll();
+  }
+
+  if (editButton) {
+    openEditDialog();
   }
 });
 
@@ -875,9 +1035,11 @@ async function handleImportFile(file) {
           disputes: normalizeRuleArray(game.disputes),
           setup: normalizeRuleArray(game.setup),
           scoring: normalizeRuleArray(game.scoring),
-          loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : []
+          loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : [],
+          expansions: normalizeExpansionArray(game.expansions)
         }));
         state.selectedId = state.games[0]?.id || "";
+        state.selectedExpansionId = "";
         renderAll();
         showBackupMessage(`成功导入 ${state.games.length} 个桌游数据。`, "success");
       }
@@ -897,6 +1059,7 @@ function resetToDefault() {
       const fresh = structuredClone(defaultState);
       state.games = fresh.games;
       state.selectedId = state.games[0]?.id || "";
+      state.selectedExpansionId = "";
       renderAll();
       showBackupMessage("已恢复默认示例数据。", "success");
     }
@@ -1070,7 +1233,126 @@ els.loanHistoryDialog.addEventListener("click", (e) => {
   if (e.target === els.loanHistoryDialog) closeLoanHistoryDialog();
 });
 
+function openExpansionDialog() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  els.expansionDialogTitle.textContent = `《${game.name}》扩展包管理`;
+  els.expansionNameInput.value = "";
+  renderExpansionList();
+  els.expansionDialog.classList.remove("hidden");
+}
+
+function closeExpansionDialog() {
+  els.expansionDialog.classList.add("hidden");
+}
+
+function renderExpansionList() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  const expansions = game.expansions || [];
+  if (expansions.length === 0) {
+    els.expansionList.innerHTML = `<p class="expansion-empty">暂无扩展包，添加第一个扩展包开始管理吧。</p>`;
+    return;
+  }
+  els.expansionList.innerHTML = expansions
+    .map((exp) => {
+      const ruleCount = getAllRules(game, exp.id).length;
+      return `
+        <div class="expansion-item" data-expansion-id="${exp.id}">
+          <div class="expansion-item-info">
+            <input type="text" class="expansion-name-input" value="${escapeHtml(exp.name)}" data-expansion-id="${exp.id}" />
+            <span class="expansion-rule-count">${ruleCount} 条规则</span>
+          </div>
+          <div class="expansion-item-actions">
+            <button type="button" class="expansion-delete-btn danger" data-expansion-id="${exp.id}" title="删除扩展包">删除</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function addExpansion() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  const name = els.expansionNameInput.value.trim();
+  if (!name) {
+    showBackupMessage("请输入扩展包名称。", "error");
+    return;
+  }
+  const newExpansion = {
+    id: crypto.randomUUID(),
+    name,
+    forgets: [],
+    disputes: [],
+    setup: [],
+    scoring: []
+  };
+  if (!game.expansions) game.expansions = [];
+  game.expansions.push(newExpansion);
+  els.expansionNameInput.value = "";
+  state.selectedExpansionId = newExpansion.id;
+  renderExpansionList();
+  renderAll();
+  showBackupMessage(`已添加扩展包《${name}》。`, "success");
+}
+
+function deleteExpansion(expansionId) {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game || !game.expansions) return;
+  const expansion = game.expansions.find((e) => e.id === expansionId);
+  if (!expansion) return;
+  showConfirm(
+    "删除扩展包",
+    `确定要删除扩展包《${expansion.name}》吗？该扩展包的所有规则都将被删除，操作不可撤销。`,
+    () => {
+      game.expansions = game.expansions.filter((e) => e.id !== expansionId);
+      if (state.selectedExpansionId === expansionId) {
+        state.selectedExpansionId = "";
+      }
+      renderExpansionList();
+      renderAll();
+      showBackupMessage(`已删除扩展包《${expansion.name}》。`, "success");
+    }
+  );
+}
+
+function renameExpansion(expansionId, newName) {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game || !game.expansions) return;
+  const expansion = game.expansions.find((e) => e.id === expansionId);
+  if (!expansion) return;
+  const trimmedName = newName.trim();
+  if (!trimmedName) return;
+  expansion.name = trimmedName;
+  saveState();
+  renderDetail();
+}
+
+els.expansionCancelBtn.addEventListener("click", closeExpansionDialog);
+els.expansionAddBtn.addEventListener("click", addExpansion);
+els.expansionDialog.addEventListener("click", (e) => {
+  if (e.target === els.expansionDialog) closeExpansionDialog();
+});
+
+els.expansionList.addEventListener("click", (e) => {
+  const deleteBtn = e.target.closest(".expansion-delete-btn");
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.expansionId;
+    deleteExpansion(id);
+  }
+});
+
+els.expansionList.addEventListener("change", (e) => {
+  const input = e.target.closest(".expansion-name-input");
+  if (input) {
+    const id = input.dataset.expansionId;
+    renameExpansion(id, input.value);
+  }
+});
+
 let editSnapshot = null;
+let editExpansionId = "";
 
 const RULE_CONTAINER_MAP = {
   forgets: "editForgesContainer",
@@ -1095,6 +1377,68 @@ function renderEditRules(ruleKey, rules) {
   container.innerHTML = rules
     .map((rule, index) => renderEditRuleItem(ruleKey, index, ruleText(rule)))
     .join("");
+}
+
+function renderEditExpansionSelect() {
+  if (!editSnapshot || !els.editExpansionSelect) return;
+  const expansions = editSnapshot.expansions || [];
+  els.editExpansionSelect.innerHTML = `
+    <option value="">基础游戏</option>
+    ${expansions.map((exp) => `<option value="${exp.id}">${escapeHtml(exp.name)}</option>`).join("")}
+  `;
+  els.editExpansionSelect.value = editExpansionId;
+}
+
+function collectEditRulesFromUI() {
+  const result = { forgets: [], disputes: [], setup: [], scoring: [] };
+  for (const ruleKey of Object.keys(RULE_CONTAINER_MAP)) {
+    const containerKey = RULE_CONTAINER_MAP[ruleKey];
+    const container = els[containerKey];
+    if (!container) continue;
+    const items = container.querySelectorAll(".edit-rule-item");
+    items.forEach((item) => {
+      const ta = item.querySelector(".edit-rule-textarea");
+      if (!ta) return;
+      const text = ta.value.trim();
+      if (text) {
+        const originalIndex = Number(item.dataset.ruleIndex);
+        const container = getRuleContainer(editSnapshot, editExpansionId);
+        const originalRule = Number.isInteger(originalIndex) && container ? container[ruleKey]?.[originalIndex] : undefined;
+        const nextRule = originalRule === undefined ? normalizeRule(text) : { ...normalizeRule(originalRule), text };
+        result[ruleKey].push(nextRule);
+      }
+    });
+  }
+  return result;
+}
+
+function saveCurrentEditRulesToSnapshot() {
+  if (!editSnapshot) return;
+  const collected = collectEditRulesFromUI();
+  const container = getRuleContainer(editSnapshot, editExpansionId);
+  if (container) {
+    container.forgets = collected.forgets;
+    container.disputes = collected.disputes;
+    container.setup = collected.setup;
+    container.scoring = collected.scoring;
+  }
+}
+
+function loadEditRulesFromSnapshot() {
+  if (!editSnapshot) return;
+  const container = getRuleContainer(editSnapshot, editExpansionId);
+  if (!container) return;
+  renderEditRules("forgets", container.forgets || []);
+  renderEditRules("disputes", container.disputes || []);
+  renderEditRules("setup", container.setup || []);
+  renderEditRules("scoring", container.scoring || []);
+}
+
+function switchEditExpansion(expansionId) {
+  saveCurrentEditRulesToSnapshot();
+  editExpansionId = expansionId;
+  loadEditRulesFromSnapshot();
+  renderEditExpansionSelect();
 }
 
 function collectEditRules() {
@@ -1133,6 +1477,7 @@ function openEditDialog() {
   if (!game) return;
 
   editSnapshot = structuredClone(game);
+  editExpansionId = state.selectedExpansionId || "";
 
   els.editDialogTitle.textContent = `编辑：${game.name}`;
   els.editNameInput.value = game.name;
@@ -1150,10 +1495,8 @@ function openEditDialog() {
     els.editCoverPreview.classList.add("hidden");
   }
 
-  renderEditRules("forgets", game.forgets);
-  renderEditRules("disputes", game.disputes);
-  renderEditRules("setup", game.setup);
-  renderEditRules("scoring", game.scoring);
+  renderEditExpansionSelect();
+  loadEditRulesFromSnapshot();
 
   hideEditErrorMessage();
   els.editDialog.classList.remove("hidden");
@@ -1161,6 +1504,7 @@ function openEditDialog() {
 
 function closeEditDialog() {
   editSnapshot = null;
+  editExpansionId = "";
   els.editDialog.classList.add("hidden");
 }
 
@@ -1212,6 +1556,12 @@ els.editDialog.addEventListener("click", (e) => {
   if (e.target === els.editDialog) closeEditDialog();
 });
 
+if (els.editExpansionSelect) {
+  els.editExpansionSelect.addEventListener("change", (e) => {
+    switchEditExpansion(e.target.value);
+  });
+}
+
 els.editForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   hideEditErrorMessage();
@@ -1248,13 +1598,13 @@ els.editForm.addEventListener("submit", async (e) => {
     return;
   }
 
+  saveCurrentEditRulesToSnapshot();
+
   let cover = editSnapshot ? editSnapshot.cover : "";
   const coverFile = els.editCoverInput.files[0];
   if (coverFile) {
     cover = await readFileAsDataUrl(coverFile);
   }
-
-  const collectedRules = collectEditRules();
 
   const gameIndex = state.games.findIndex((g) => g.id === (editSnapshot ? editSnapshot.id : state.selectedId));
   if (gameIndex === -1) {
@@ -1271,10 +1621,11 @@ els.editForm.addEventListener("submit", async (e) => {
     complexity,
     lastPlayed,
     cover,
-    forgets: collectedRules.forgets,
-    disputes: collectedRules.disputes,
-    setup: collectedRules.setup,
-    scoring: collectedRules.scoring
+    forgets: editSnapshot.forgets,
+    disputes: editSnapshot.disputes,
+    setup: editSnapshot.setup,
+    scoring: editSnapshot.scoring,
+    expansions: structuredClone(editSnapshot.expansions || [])
   };
 
   closeEditDialog();

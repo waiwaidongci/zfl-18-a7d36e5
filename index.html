@@ -159,6 +159,23 @@
         </div>
       </div>
 
+      <div id="expansionDialog" class="dialog-overlay hidden">
+        <div class="dialog expansion-dialog">
+          <h3 id="expansionDialogTitle">扩展包管理</h3>
+          <div id="expansionList" class="expansion-list"></div>
+          <div class="expansion-form">
+            <label>
+              扩展包名称
+              <input id="expansionNameInput" type="text" placeholder="例：奥尔良：贸易与阴谋" />
+            </label>
+            <div class="dialog-actions">
+              <button id="expansionCancelBtn" type="button">关闭</button>
+              <button id="expansionAddBtn" type="button" class="primary">添加扩展包</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="editDialog" class="dialog-overlay hidden">
         <div class="dialog edit-dialog">
           <h3 id="editDialogTitle">编辑桌游</h3>
@@ -201,6 +218,13 @@
             </label>
             <div id="editCoverPreview" class="edit-cover-preview hidden">
               <img id="editCoverPreviewImg" alt="封面预览" />
+            </div>
+
+            <div class="edit-expansion-switcher">
+              <h4>编辑内容</h4>
+              <select id="editExpansionSelect">
+                <option value="">基础游戏</option>
+              </select>
             </div>
 
             <div class="edit-rules-section">
