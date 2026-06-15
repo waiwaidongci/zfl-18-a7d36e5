@@ -1182,3 +1182,116 @@ label {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+.edit-dialog {
+  max-width: 640px;
+  max-height: 90vh;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.edit-form {
+  display: grid;
+  gap: 12px;
+}
+
+.edit-form h4 {
+  margin: 8px 0 6px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.edit-cover-preview {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  width: 100%;
+  max-width: 200px;
+  aspect-ratio: 1.55;
+  background: var(--bg);
+}
+
+.edit-cover-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.edit-rules-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+}
+
+.edit-rules-container {
+  display: grid;
+  gap: 8px;
+}
+
+.edit-rule-item {
+  display: grid;
+  grid-template-columns: 1fr 36px;
+  gap: 8px;
+  align-items: start;
+}
+
+.edit-rule-item textarea {
+  min-height: 60px;
+  font-size: 13px;
+}
+
+.edit-rule-item button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.edit-rule-item button:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.add-rule-btn {
+  justify-self: start;
+  padding: 6px 12px;
+  font-size: 13px;
+  background: rgba(49, 95, 134, 0.08);
+  border-color: rgba(49, 95, 134, 0.3);
+  color: var(--blue);
+}
+
+.add-rule-btn:hover {
+  background: rgba(49, 95, 134, 0.15);
+}
+
+.edit-error-message {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(179, 72, 72, 0.08);
+  color: var(--red);
+  border: 1px solid rgba(179, 72, 72, 0.3);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .edit-dialog {
+    max-height: 95vh;
+  }
+}

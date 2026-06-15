@@ -142,7 +142,25 @@ const els = {
   loanHistoryDialog: document.querySelector("#loanHistoryDialog"),
   loanHistoryTitle: document.querySelector("#loanHistoryTitle"),
   loanHistoryContent: document.querySelector("#loanHistoryContent"),
-  loanHistoryCloseBtn: document.querySelector("#loanHistoryCloseBtn")
+  loanHistoryCloseBtn: document.querySelector("#loanHistoryCloseBtn"),
+  editDialog: document.querySelector("#editDialog"),
+  editDialogTitle: document.querySelector("#editDialogTitle"),
+  editForm: document.querySelector("#editForm"),
+  editNameInput: document.querySelector("#editNameInput"),
+  editMinPlayersInput: document.querySelector("#editMinPlayersInput"),
+  editMaxPlayersInput: document.querySelector("#editMaxPlayersInput"),
+  editDurationInput: document.querySelector("#editDurationInput"),
+  editComplexityInput: document.querySelector("#editComplexityInput"),
+  editLastPlayedInput: document.querySelector("#editLastPlayedInput"),
+  editCoverInput: document.querySelector("#editCoverInput"),
+  editCoverPreview: document.querySelector("#editCoverPreview"),
+  editCoverPreviewImg: document.querySelector("#editCoverPreviewImg"),
+  editForgesContainer: document.querySelector("#editForgesContainer"),
+  editDisputesContainer: document.querySelector("#editDisputesContainer"),
+  editSetupContainer: document.querySelector("#editSetupContainer"),
+  editScoringContainer: document.querySelector("#editScoringContainer"),
+  editErrorMessage: document.querySelector("#editErrorMessage"),
+  editCancelBtn: document.querySelector("#editCancelBtn")
 };
 
 function loadState() {
@@ -469,6 +487,7 @@ function renderDetail() {
         <button class="primary" type="submit">加入规则卡片</button>
       </form>
       <div class="detail-actions">
+        <button id="editGameBtn" type="button" class="primary">编辑</button>
         <button id="playedTodayBtn" type="button">标记今天玩过</button>
         <button id="deleteGameBtn" type="button">删除桌游</button>
       </div>
@@ -1049,4 +1068,219 @@ els.loanDialog.addEventListener("click", (e) => {
 els.loanHistoryCloseBtn.addEventListener("click", closeLoanHistoryDialog);
 els.loanHistoryDialog.addEventListener("click", (e) => {
   if (e.target === els.loanHistoryDialog) closeLoanHistoryDialog();
+});
+
+let editSnapshot = null;
+
+const RULE_CONTAINER_MAP = {
+  forgets: "editForgesContainer",
+  disputes: "editDisputesContainer",
+  setup: "editSetupContainer",
+  scoring: "editScoringContainer"
+};
+
+function renderEditRuleItem(ruleKey, index, ruleText) {
+  return `
+    <div class="edit-rule-item" data-rule-key="${ruleKey}" data-rule-index="${index}">
+      <textarea class="edit-rule-textarea" placeholder="请输入规则内容" rows="2">${escapeHtml(ruleText)}</textarea>
+      <button type="button" class="edit-remove-rule-btn" title="删除此条">×</button>
+    </div>
+  `;
+}
+
+function renderEditRules(ruleKey, rules) {
+  const containerKey = RULE_CONTAINER_MAP[ruleKey];
+  const container = els[containerKey];
+  if (!container) return;
+  container.innerHTML = rules
+    .map((rule, index) => renderEditRuleItem(ruleKey, index, ruleText(rule)))
+    .join("");
+}
+
+function collectEditRules() {
+  const result = { forgets: [], disputes: [], setup: [], scoring: [] };
+  for (const ruleKey of Object.keys(RULE_CONTAINER_MAP)) {
+    const containerKey = RULE_CONTAINER_MAP[ruleKey];
+    const container = els[containerKey];
+    if (!container) continue;
+    const textareas = container.querySelectorAll(".edit-rule-textarea");
+    textareas.forEach((ta) => {
+      const text = ta.value.trim();
+      if (text) {
+        result[ruleKey].push(normalizeRule(text));
+      }
+    });
+  }
+  return result;
+}
+
+function showEditErrorMessage(message) {
+  els.editErrorMessage.textContent = message;
+  els.editErrorMessage.classList.remove("hidden");
+}
+
+function hideEditErrorMessage() {
+  els.editErrorMessage.classList.add("hidden");
+}
+
+function openEditDialog() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+
+  editSnapshot = structuredClone(game);
+
+  els.editDialogTitle.textContent = `编辑：${game.name}`;
+  els.editNameInput.value = game.name;
+  els.editMinPlayersInput.value = game.minPlayers;
+  els.editMaxPlayersInput.value = game.maxPlayers;
+  els.editDurationInput.value = game.duration;
+  els.editComplexityInput.value = game.complexity;
+  els.editLastPlayedInput.value = game.lastPlayed;
+  els.editCoverInput.value = "";
+
+  if (game.cover) {
+    els.editCoverPreviewImg.src = game.cover;
+    els.editCoverPreview.classList.remove("hidden");
+  } else {
+    els.editCoverPreview.classList.add("hidden");
+  }
+
+  renderEditRules("forgets", game.forgets);
+  renderEditRules("disputes", game.disputes);
+  renderEditRules("setup", game.setup);
+  renderEditRules("scoring", game.scoring);
+
+  hideEditErrorMessage();
+  els.editDialog.classList.remove("hidden");
+}
+
+function closeEditDialog() {
+  editSnapshot = null;
+  els.editDialog.classList.add("hidden");
+}
+
+els.editCoverInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) {
+    if (editSnapshot && editSnapshot.cover) {
+      els.editCoverPreviewImg.src = editSnapshot.cover;
+      els.editCoverPreview.classList.remove("hidden");
+    } else {
+      els.editCoverPreview.classList.add("hidden");
+    }
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    els.editCoverPreviewImg.src = reader.result;
+    els.editCoverPreview.classList.remove("hidden");
+  };
+  reader.readAsDataURL(file);
+});
+
+els.editForm.addEventListener("click", (e) => {
+  const addBtn = e.target.closest(".add-rule-btn");
+  const removeBtn = e.target.closest(".edit-remove-rule-btn");
+
+  if (addBtn) {
+    const ruleKey = addBtn.dataset.ruleKey;
+    const containerKey = RULE_CONTAINER_MAP[ruleKey];
+    const container = els[containerKey];
+    if (!container) return;
+    const currentCount = container.querySelectorAll(".edit-rule-item").length;
+    const newItem = document.createElement("div");
+    newItem.innerHTML = renderEditRuleItem(ruleKey, currentCount, "");
+    container.appendChild(newItem.firstElementChild);
+    return;
+  }
+
+  if (removeBtn) {
+    const item = removeBtn.closest(".edit-rule-item");
+    if (item) {
+      item.remove();
+    }
+    return;
+  }
+});
+
+els.editCancelBtn.addEventListener("click", closeEditDialog);
+els.editDialog.addEventListener("click", (e) => {
+  if (e.target === els.editDialog) closeEditDialog();
+});
+
+els.editForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  hideEditErrorMessage();
+
+  const name = els.editNameInput.value.trim();
+  const minPlayers = Number(els.editMinPlayersInput.value);
+  const maxPlayers = Number(els.editMaxPlayersInput.value);
+  const duration = Number(els.editDurationInput.value);
+  const complexity = els.editComplexityInput.value;
+  const lastPlayed = els.editLastPlayedInput.value;
+
+  if (!name) {
+    showEditErrorMessage("请输入桌游名称。");
+    return;
+  }
+  if (!minPlayers || minPlayers < 1) {
+    showEditErrorMessage("最少人数必须至少为 1 人。");
+    return;
+  }
+  if (!maxPlayers || maxPlayers < 1) {
+    showEditErrorMessage("最多人数必须至少为 1 人。");
+    return;
+  }
+  if (minPlayers > maxPlayers) {
+    showEditErrorMessage("最少人数不能大于最多人数。");
+    return;
+  }
+  if (!duration || duration < 5) {
+    showEditErrorMessage("时长必须至少为 5 分钟。");
+    return;
+  }
+  if (!lastPlayed) {
+    showEditErrorMessage("请选择上次游玩日期。");
+    return;
+  }
+
+  let cover = editSnapshot ? editSnapshot.cover : "";
+  const coverFile = els.editCoverInput.files[0];
+  if (coverFile) {
+    cover = await readFileAsDataUrl(coverFile);
+  }
+
+  const collectedRules = collectEditRules();
+
+  const gameIndex = state.games.findIndex((g) => g.id === (editSnapshot ? editSnapshot.id : state.selectedId));
+  if (gameIndex === -1) {
+    closeEditDialog();
+    return;
+  }
+
+  state.games[gameIndex] = {
+    ...state.games[gameIndex],
+    name,
+    minPlayers,
+    maxPlayers,
+    duration,
+    complexity,
+    lastPlayed,
+    cover,
+    forgets: collectedRules.forgets,
+    disputes: collectedRules.disputes,
+    setup: collectedRules.setup,
+    scoring: collectedRules.scoring
+  };
+
+  closeEditDialog();
+  renderAll();
+  showBackupMessage(`《${name}》已更新。`, "success");
+});
+
+els.detailView.addEventListener("click", (event) => {
+  const editButton = event.target.closest("#editGameBtn");
+  if (editButton) {
+    openEditDialog();
+  }
 });

@@ -159,6 +159,83 @@
         </div>
       </div>
 
+      <div id="editDialog" class="dialog-overlay hidden">
+        <div class="dialog edit-dialog">
+          <h3 id="editDialogTitle">编辑桌游</h3>
+          <form id="editForm" class="edit-form">
+            <label>
+              名称
+              <input id="editNameInput" type="text" required placeholder="例：勃艮第城堡" />
+            </label>
+            <div class="split">
+              <label>
+                最少人数
+                <input id="editMinPlayersInput" type="number" min="1" max="12" required />
+              </label>
+              <label>
+                最多人数
+                <input id="editMaxPlayersInput" type="number" min="1" max="12" required />
+              </label>
+            </div>
+            <div class="split">
+              <label>
+                时长分钟
+                <input id="editDurationInput" type="number" min="5" required />
+              </label>
+              <label>
+                复杂度
+                <select id="editComplexityInput">
+                  <option value="轻">轻</option>
+                  <option value="中">中</option>
+                  <option value="重">重</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              上次游玩
+              <input id="editLastPlayedInput" type="date" required />
+            </label>
+            <label>
+              封面图
+              <input id="editCoverInput" type="file" accept="image/*" />
+            </label>
+            <div id="editCoverPreview" class="edit-cover-preview hidden">
+              <img id="editCoverPreviewImg" alt="封面预览" />
+            </div>
+
+            <div class="edit-rules-section">
+              <h4>容易忘的规则</h4>
+              <div id="editForgesContainer" class="edit-rules-container"></div>
+              <button type="button" class="add-rule-btn" data-rule-key="forgets">+ 添加一条</button>
+            </div>
+
+            <div class="edit-rules-section">
+              <h4>常见争议</h4>
+              <div id="editDisputesContainer" class="edit-rules-container"></div>
+              <button type="button" class="add-rule-btn" data-rule-key="disputes">+ 添加一条</button>
+            </div>
+
+            <div class="edit-rules-section">
+              <h4>开局准备</h4>
+              <div id="editSetupContainer" class="edit-rules-container"></div>
+              <button type="button" class="add-rule-btn" data-rule-key="setup">+ 添加一条</button>
+            </div>
+
+            <div class="edit-rules-section">
+              <h4>计分提醒</h4>
+              <div id="editScoringContainer" class="edit-rules-container"></div>
+              <button type="button" class="add-rule-btn" data-rule-key="scoring">+ 添加一条</button>
+            </div>
+
+            <div id="editErrorMessage" class="edit-error-message hidden"></div>
+            <div class="dialog-actions">
+              <button id="editCancelBtn" type="button">取消</button>
+              <button id="editSubmitBtn" type="submit" class="primary">保存</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <section class="layout">
         <aside class="panel">
           <h2>新增桌游</h2>
