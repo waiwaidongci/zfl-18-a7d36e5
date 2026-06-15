@@ -260,6 +260,37 @@
         </div>
       </div>
 
+      <div id="rulingDialog" class="dialog-overlay hidden">
+        <div class="dialog ruling-dialog">
+          <h3 id="rulingDialogTitle">新增裁定</h3>
+          <p id="rulingDisputeLabel" class="ruling-dispute-label"></p>
+          <form id="rulingForm" class="ruling-form">
+            <label>
+              采用裁定
+              <textarea id="rulingDecisionInput" rows="3" placeholder="本次聚会最终采用的裁定" required></textarea>
+            </label>
+            <div class="split">
+              <label>
+                参与人数
+                <input id="rulingParticipantsInput" type="number" min="1" max="20" required />
+              </label>
+              <label>
+                裁定日期
+                <input id="rulingDateInput" type="date" required />
+              </label>
+            </div>
+            <label>
+              备注
+              <textarea id="rulingNotesInput" rows="2" placeholder="可选，补充说明"></textarea>
+            </label>
+            <div class="dialog-actions">
+              <button id="rulingCancelBtn" type="button">取消</button>
+              <button id="rulingSubmitBtn" type="submit" class="primary">确认裁定</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <section class="layout">
         <aside class="panel">
           <h2>新增桌游</h2>
