@@ -1,4 +1,5 @@
 const storageKey = "zfl18-boardgame-rule-cards";
+const SCHEMA_VERSION = 1;
 const today = new Date();
 
 const REVIEW_STATUS = {
@@ -14,14 +15,37 @@ const REVIEW_STATUS_LABELS = {
   [REVIEW_STATUS.MUST_REVIEW]: "下次必看"
 };
 
+function generateId() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "id-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
+}
+
+function createRuleCard(text, status = REVIEW_STATUS.UNMARKED, createdAt = null) {
+  return {
+    id: generateId(),
+    text: String(text || ""),
+    status: status ?? REVIEW_STATUS.UNMARKED,
+    createdAt: createdAt || new Date().toISOString()
+  };
+}
+
+function isRuleCardV1(rule) {
+  return rule && typeof rule === "object" && "id" in rule && "createdAt" in rule;
+}
+
 function normalizeRule(rule) {
   if (typeof rule === "string") {
-    return { text: rule, status: REVIEW_STATUS.UNMARKED };
+    return createRuleCard(rule, REVIEW_STATUS.UNMARKED);
   }
-  return {
-    text: rule?.text ?? "",
-    status: rule?.status ?? REVIEW_STATUS.UNMARKED
-  };
+  if (isRuleCardV1(rule)) {
+    return {
+      id: rule.id || generateId(),
+      text: String(rule.text || ""),
+      status: rule.status ?? REVIEW_STATUS.UNMARKED,
+      createdAt: rule.createdAt || new Date().toISOString()
+    };
+  }
+  return createRuleCard(rule?.text ?? "", rule?.status ?? REVIEW_STATUS.UNMARKED);
 }
 
 function normalizeRuleArray(arr) {
@@ -71,7 +95,75 @@ function normalizeExpansionArray(arr) {
   return arr.map(normalizeExpansion).filter(Boolean);
 }
 
+function migrateRuleArrayV0ToV1(rules, defaultDate = null) {
+  if (!Array.isArray(rules)) return [];
+  const baseDate = defaultDate || new Date().toISOString();
+  return rules.map((rule, index) => {
+    if (isRuleCardV1(rule)) {
+      return {
+        id: rule.id || generateId(),
+        text: String(rule.text || ""),
+        status: rule.status ?? REVIEW_STATUS.UNMARKED,
+        createdAt: rule.createdAt || baseDate
+      };
+    }
+    const text = typeof rule === "string" ? rule : (rule?.text || "");
+    const status = typeof rule === "string" ? REVIEW_STATUS.UNMARKED : (rule?.status ?? REVIEW_STATUS.UNMARKED);
+    return createRuleCard(text, status, baseDate);
+  });
+}
+
+function migrateGameV0ToV1(game) {
+  if (!game || typeof game !== "object") return null;
+  const migratedDate = game.lastPlayed
+    ? new Date(game.lastPlayed).toISOString()
+    : new Date().toISOString();
+  return {
+    ...game,
+    id: game.id || generateId(),
+    forgets: migrateRuleArrayV0ToV1(game.forgets, migratedDate),
+    disputes: migrateRuleArrayV0ToV1(game.disputes, migratedDate),
+    setup: migrateRuleArrayV0ToV1(game.setup, migratedDate),
+    scoring: migrateRuleArrayV0ToV1(game.scoring, migratedDate),
+    expansions: Array.isArray(game.expansions)
+      ? game.expansions.map((exp) => ({
+          ...exp,
+          id: exp.id || generateId(),
+          forgets: migrateRuleArrayV0ToV1(exp.forgets, migratedDate),
+          disputes: migrateRuleArrayV0ToV1(exp.disputes, migratedDate),
+          setup: migrateRuleArrayV0ToV1(exp.setup, migratedDate),
+          scoring: migrateRuleArrayV0ToV1(exp.scoring, migratedDate)
+        }))
+      : []
+  };
+}
+
+function migrateV0ToV1(parsed) {
+  const result = { ...parsed };
+  if (Array.isArray(result.games)) {
+    result.games = result.games.map(migrateGameV0ToV1).filter(Boolean);
+  }
+  result.schemaVersion = SCHEMA_VERSION;
+  return result;
+}
+
+function runMigrations(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return { schemaVersion: SCHEMA_VERSION, games: [] };
+  }
+  const currentVersion = typeof parsed.schemaVersion === "number" ? parsed.schemaVersion : 0;
+  if (currentVersion >= SCHEMA_VERSION) {
+    return parsed;
+  }
+  let migrated = parsed;
+  if (currentVersion < 1) {
+    migrated = migrateV0ToV1(migrated);
+  }
+  return migrated;
+}
+
 const defaultState = {
+  schemaVersion: SCHEMA_VERSION,
   selectedId: "",
   selectedExpansionId: "",
   selectedChecklistIds: [],
@@ -239,8 +331,9 @@ function loadState() {
   if (!saved) return structuredClone(defaultState);
   try {
     const parsed = JSON.parse(saved);
-    const games = Array.isArray(parsed.games)
-      ? parsed.games.map((game) => {
+    const migrated = runMigrations(parsed);
+    const games = Array.isArray(migrated.games)
+      ? migrated.games.map((game) => {
           const normalized = {
             ...game,
             loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : [],
@@ -259,15 +352,20 @@ function loadState() {
           return normalized;
         })
       : structuredClone(defaultState).games;
-    return {
+    const result = {
       ...structuredClone(defaultState),
-      ...parsed,
+      ...migrated,
       games,
-      selectedExpansionId: parsed.selectedExpansionId || "",
-      selectedChecklistIds: Array.isArray(parsed.selectedChecklistIds) ? parsed.selectedChecklistIds : [],
-      checklistPlayerFilter: parsed.checklistPlayerFilter || "all",
-      filterMustReview: parsed.filterMustReview || false
+      schemaVersion: SCHEMA_VERSION,
+      selectedExpansionId: migrated.selectedExpansionId || "",
+      selectedChecklistIds: Array.isArray(migrated.selectedChecklistIds) ? migrated.selectedChecklistIds : [],
+      checklistPlayerFilter: migrated.checklistPlayerFilter || "all",
+      filterMustReview: migrated.filterMustReview || false
     };
+    if (saved !== JSON.stringify(result)) {
+      localStorage.setItem(storageKey, JSON.stringify(result));
+    }
+    return result;
   } catch {
     return structuredClone(defaultState);
   }
@@ -1455,6 +1553,7 @@ els.confirmDialog.addEventListener("click", (e) => {
 function exportData() {
   const exportObj = {
     version: 1,
+    schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     games: state.games
   };
