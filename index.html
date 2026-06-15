@@ -74,6 +74,32 @@
         <div id="backupMessage" class="backup-message hidden"></div>
       </section>
 
+      <section class="checklist-panel panel">
+        <div class="panel-head">
+          <h2>🎉 聚会前复习清单</h2>
+          <span id="checklistSelectedCount">已选 0 个</span>
+        </div>
+        <div class="checklist-controls">
+          <label class="checklist-filter">
+            按人数筛选
+            <select id="checklistPlayerFilter">
+              <option value="all">全部人数</option>
+              <option value="2">2人</option>
+              <option value="3">3人</option>
+              <option value="4">4人</option>
+              <option value="5">5人</option>
+              <option value="6">6人+</option>
+            </select>
+          </label>
+          <div class="checklist-actions">
+            <button id="clearChecklistBtn" type="button">清空选择</button>
+            <button id="generateChecklistBtn" type="button" class="primary">生成复习清单</button>
+          </div>
+        </div>
+        <div id="checklistGameList" class="checklist-game-list"></div>
+        <div id="checklistView" class="checklist-view hidden"></div>
+      </section>
+
       <div id="confirmDialog" class="dialog-overlay hidden">
         <div class="dialog">
           <h3 id="confirmTitle">确认操作</h3>

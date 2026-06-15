@@ -3,6 +3,8 @@ const today = new Date();
 
 const defaultState = {
   selectedId: "",
+  selectedChecklistIds: [],
+  checklistPlayerFilter: "all",
   games: [
     {
       id: crypto.randomUUID(),
@@ -80,14 +82,26 @@ const els = {
   confirmTitle: document.querySelector("#confirmTitle"),
   confirmMessage: document.querySelector("#confirmMessage"),
   confirmOk: document.querySelector("#confirmOk"),
-  confirmCancel: document.querySelector("#confirmCancel")
+  confirmCancel: document.querySelector("#confirmCancel"),
+  checklistPlayerFilter: document.querySelector("#checklistPlayerFilter"),
+  checklistGameList: document.querySelector("#checklistGameList"),
+  checklistView: document.querySelector("#checklistView"),
+  checklistSelectedCount: document.querySelector("#checklistSelectedCount"),
+  clearChecklistBtn: document.querySelector("#clearChecklistBtn"),
+  generateChecklistBtn: document.querySelector("#generateChecklistBtn")
 };
 
 function loadState() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) return structuredClone(defaultState);
   try {
-    return { ...structuredClone(defaultState), ...JSON.parse(saved) };
+    const parsed = JSON.parse(saved);
+    return {
+      ...structuredClone(defaultState),
+      ...parsed,
+      selectedChecklistIds: Array.isArray(parsed.selectedChecklistIds) ? parsed.selectedChecklistIds : [],
+      checklistPlayerFilter: parsed.checklistPlayerFilter || "all"
+    };
   } catch {
     return structuredClone(defaultState);
   }
@@ -230,11 +244,87 @@ function renderRuleSection(title, key, items) {
   `;
 }
 
+function getChecklistFilteredGames() {
+  const player = state.checklistPlayerFilter;
+  return state.games.filter((game) => {
+    if (player === "all") return true;
+    if (player === "6") return game.maxPlayers >= 6;
+    const p = Number(player);
+    return p >= game.minPlayers && p <= game.maxPlayers;
+  }).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+}
+
+function renderChecklistGames() {
+  const games = getChecklistFilteredGames();
+  els.checklistSelectedCount.textContent = `已选 ${state.selectedChecklistIds.length} 个`;
+  els.checklistPlayerFilter.value = state.checklistPlayerFilter;
+
+  els.checklistGameList.innerHTML =
+    games
+      .map((game) => {
+        const checked = state.selectedChecklistIds.includes(game.id) ? "checked" : "";
+        const checkedClass = checked ? "checked" : "";
+        return `
+          <label class="checklist-game-card ${checkedClass}">
+            <input type="checkbox" data-checklist-id="${game.id}" ${checked} />
+            <div class="checklist-game-info">
+              <strong>${escapeHtml(game.name)}</strong>
+              <span>${game.minPlayers}-${game.maxPlayers}人 · ${game.duration}分钟</span>
+            </div>
+          </label>
+        `;
+      })
+      .join("") || `<p class="checklist-empty">没有符合人数筛选的桌游。</p>`;
+}
+
+function renderChecklist() {
+  const selectedGames = state.games.filter((g) => state.selectedChecklistIds.includes(g.id));
+
+  if (selectedGames.length === 0) {
+    els.checklistView.classList.add("hidden");
+    return;
+  }
+
+  const sectionsHtml = selectedGames
+    .map((game) => {
+      const forgetsHtml = game.forgets.length
+        ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${game.forgets.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>`
+        : "";
+      const setupHtml = game.setup.length
+        ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${game.setup.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div>`
+        : "";
+      const scoringHtml = game.scoring.length
+        ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${game.scoring.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div>`
+        : "";
+
+      return `
+        <section class="checklist-game-section">
+          <div class="checklist-game-header">
+            <h4>${escapeHtml(game.name)}</h4>
+            <span class="pill">${game.minPlayers}-${game.maxPlayers}人</span>
+            <span class="pill">${game.duration}分钟</span>
+          </div>
+          ${forgetsHtml}
+          ${setupHtml}
+          ${scoringHtml}
+        </section>
+      `;
+    })
+    .join("");
+
+  els.checklistView.innerHTML = `
+    <h3>📋 今晚聚会复习清单 · ${selectedGames.length} 个游戏</h3>
+    ${sectionsHtml}
+  `;
+  els.checklistView.classList.remove("hidden");
+}
+
 function renderAll() {
   saveState();
   renderSummary();
   renderList();
   renderDetail();
+  renderChecklistGames();
 }
 
 function readFileAsDataUrl(file) {
@@ -484,3 +574,38 @@ els.exportBtn.addEventListener("click", exportData);
 els.importBtn.addEventListener("click", () => els.importFile.click());
 els.importFile.addEventListener("change", (e) => handleImportFile(e.target.files[0]));
 els.resetBtn.addEventListener("click", resetToDefault);
+
+els.checklistPlayerFilter.addEventListener("change", () => {
+  state.checklistPlayerFilter = els.checklistPlayerFilter.value;
+  renderAll();
+});
+
+els.checklistGameList.addEventListener("change", (event) => {
+  const checkbox = event.target.closest("[data-checklist-id]");
+  if (!checkbox) return;
+  const gameId = checkbox.dataset.checklistId;
+  if (checkbox.checked) {
+    if (!state.selectedChecklistIds.includes(gameId)) {
+      state.selectedChecklistIds.push(gameId);
+    }
+  } else {
+    state.selectedChecklistIds = state.selectedChecklistIds.filter((id) => id !== gameId);
+  }
+  renderChecklistGames();
+  saveState();
+});
+
+els.clearChecklistBtn.addEventListener("click", () => {
+  state.selectedChecklistIds = [];
+  els.checklistView.classList.add("hidden");
+  renderAll();
+});
+
+els.generateChecklistBtn.addEventListener("click", () => {
+  if (state.selectedChecklistIds.length === 0) {
+    showBackupMessage("请先选择至少一个桌游。", "error");
+    return;
+  }
+  renderChecklist();
+  els.checklistView.scrollIntoView({ behavior: "smooth", block: "start" });
+});
