@@ -254,7 +254,13 @@ function getChecklistFilteredGames() {
   }).sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
 }
 
+function syncChecklistSelection() {
+  const validIds = new Set(state.games.map((game) => game.id));
+  state.selectedChecklistIds = state.selectedChecklistIds.filter((id) => validIds.has(id));
+}
+
 function renderChecklistGames() {
+  syncChecklistSelection();
   const games = getChecklistFilteredGames();
   els.checklistSelectedCount.textContent = `已选 ${state.selectedChecklistIds.length} 个`;
   els.checklistPlayerFilter.value = state.checklistPlayerFilter;
@@ -278,10 +284,12 @@ function renderChecklistGames() {
 }
 
 function renderChecklist() {
+  syncChecklistSelection();
   const selectedGames = state.games.filter((g) => state.selectedChecklistIds.includes(g.id));
 
   if (selectedGames.length === 0) {
     els.checklistView.classList.add("hidden");
+    els.checklistView.innerHTML = "";
     return;
   }
 
@@ -428,6 +436,10 @@ els.detailView.addEventListener("click", (event) => {
   if (deleteButton) {
     state.games = state.games.filter((item) => item.id !== game.id);
     state.selectedId = state.games[0]?.id || "";
+    syncChecklistSelection();
+    if (!els.checklistView.classList.contains("hidden")) {
+      renderChecklist();
+    }
     renderAll();
   }
 });
