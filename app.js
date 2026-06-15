@@ -115,12 +115,12 @@ function migrateRuleArrayV0ToV1(rules, defaultDate = null) {
 
 function migrateGameV0ToV1(game) {
   if (!game || typeof game !== "object") return null;
-  const migratedDate = game.lastPlayed
-    ? new Date(game.lastPlayed).toISOString()
-    : new Date().toISOString();
+  const normalizedLastPlayed = normalizeLastPlayed(game.lastPlayed);
+  const migratedDate = new Date(`${normalizedLastPlayed}T00:00:00`).toISOString();
   return {
     ...game,
     id: game.id || generateId(),
+    lastPlayed: normalizedLastPlayed,
     forgets: migrateRuleArrayV0ToV1(game.forgets, migratedDate),
     disputes: migrateRuleArrayV0ToV1(game.disputes, migratedDate),
     setup: migrateRuleArrayV0ToV1(game.setup, migratedDate),
@@ -336,6 +336,14 @@ function loadState() {
       ? migrated.games.map((game) => {
           const normalized = {
             ...game,
+            id: game.id || generateId(),
+            name: String(game.name || ""),
+            minPlayers: Math.max(1, Number(game.minPlayers) || 2),
+            maxPlayers: Math.max(1, Number(game.maxPlayers) || 4),
+            duration: Math.max(5, Number(game.duration) || 60),
+            complexity: ["轻", "中", "重"].includes(game.complexity) ? game.complexity : "中",
+            lastPlayed: normalizeLastPlayed(game.lastPlayed),
+            cover: String(game.cover || ""),
             loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : [],
             forgets: normalizeRuleArray(game.forgets),
             disputes: normalizeRuleArray(game.disputes),
@@ -344,6 +352,9 @@ function loadState() {
             expansions: normalizeExpansionArray(game.expansions),
             disputeRulings: normalizeDisputeRulings(game.disputeRulings)
           };
+          if (normalized.minPlayers > normalized.maxPlayers) {
+            normalized.maxPlayers = normalized.minPlayers;
+          }
           const newContainers = [{ disputes: normalized.disputes, expansionId: "" }];
           for (const exp of normalized.expansions || []) {
             newContainers.push({ disputes: exp.disputes, expansionId: exp.id });
@@ -381,6 +392,42 @@ function getSortedLoanRecords(game) {
   return [...game.loanRecords].sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
 }
 
+function isValidDateString(str) {
+  if (typeof str !== "string") return false;
+  const trimmed = str.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return false;
+  const d = new Date(`${trimmed}T00:00:00`);
+  if (isNaN(d.getTime())) return false;
+  const parts = trimmed.split("-").map(Number);
+  return d.getFullYear() === parts[0] && d.getMonth() + 1 === parts[1] && d.getDate() === parts[2];
+}
+
+function getDefaultLastPlayed() {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 2);
+  return d.toISOString().slice(0, 10);
+}
+
+function normalizeLastPlayed(value) {
+  if (isValidDateString(value)) {
+    const d = new Date(`${value}T00:00:00`);
+    const now = new Date();
+    if (d > now) {
+      return now.toISOString().slice(0, 10);
+    }
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) {
+      const now = new Date();
+      if (parsed > now) parsed.setTime(now.getTime());
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+  return getDefaultLastPlayed();
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return "-";
   const d = new Date(dateStr);
@@ -391,7 +438,9 @@ function formatDate(dateStr) {
 function daysBetween(fromStr, toStr) {
   const from = new Date(`${fromStr}T00:00:00`);
   const to = new Date(`${toStr}T00:00:00`);
-  return Math.floor((to - from) / 86400000);
+  if (isNaN(from.getTime()) || isNaN(to.getTime())) return 0;
+  const diff = Math.floor((to - from) / 86400000);
+  return isNaN(diff) ? 0 : diff;
 }
 
 function isOverdue(loan) {
@@ -404,8 +453,11 @@ function saveState() {
 }
 
 function daysSince(dateString) {
+  if (!isValidDateString(dateString)) return 0;
   const date = new Date(`${dateString}T00:00:00`);
-  return Math.max(0, Math.floor((today - date) / 86400000));
+  if (isNaN(date.getTime())) return 0;
+  const diff = Math.floor((today - date) / 86400000);
+  return Math.max(0, isNaN(diff) ? 0 : diff);
 }
 
 function getExpansionById(game, expansionId) {
@@ -1609,20 +1661,21 @@ async function handleImportFile(file) {
     } catch {
       throw new Error("JSON 解析失败，请检查文件格式。");
     }
-    const games = validateImportData(parsed);
+    const migrated = runMigrations(parsed);
+    const games = validateImportData(migrated);
     showConfirm(
       "确认导入数据",
       `即将导入 ${games.length} 个桌游，这将覆盖当前的全部收藏数据，操作不可撤销。确定继续吗？`,
       () => {
         state.games = games.map((game) => {
           const normalized = {
-            id: game.id || crypto.randomUUID(),
+            id: game.id || generateId(),
             name: String(game.name || ""),
-            minPlayers: Number(game.minPlayers) || 2,
-            maxPlayers: Number(game.maxPlayers) || 4,
-            duration: Number(game.duration) || 60,
+            minPlayers: Math.max(1, Number(game.minPlayers) || 2),
+            maxPlayers: Math.max(1, Number(game.maxPlayers) || 4),
+            duration: Math.max(5, Number(game.duration) || 60),
             complexity: ["轻", "中", "重"].includes(game.complexity) ? game.complexity : "中",
-            lastPlayed: String(game.lastPlayed || new Date().toISOString().slice(0, 10)),
+            lastPlayed: normalizeLastPlayed(game.lastPlayed),
             cover: String(game.cover || ""),
             forgets: normalizeRuleArray(game.forgets),
             disputes: normalizeRuleArray(game.disputes),
@@ -1632,6 +1685,9 @@ async function handleImportFile(file) {
             expansions: normalizeExpansionArray(game.expansions),
             disputeRulings: normalizeDisputeRulings(game.disputeRulings)
           };
+          if (normalized.minPlayers > normalized.maxPlayers) {
+            normalized.maxPlayers = normalized.minPlayers;
+          }
           const newContainers = [{ disputes: normalized.disputes, expansionId: "" }];
           for (const exp of normalized.expansions || []) {
             newContainers.push({ disputes: exp.disputes, expansionId: exp.id });
