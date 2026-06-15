@@ -1634,11 +1634,12 @@ function submitRuling(event) {
   event.preventDefault();
   const game = state.games.find((item) => item.id === state.selectedId);
   if (!game) return;
+  const disputeText = currentRulingDisputeText;
   const decision = els.rulingDecisionInput.value.trim();
   const participants = Number(els.rulingParticipantsInput.value);
   const date = els.rulingDateInput.value;
   const notes = els.rulingNotesInput.value.trim();
-  if (!decision || !participants || !date) return;
+  if (!disputeText || !decision || !participants || !date) return;
 
   if (!Array.isArray(game.disputeRulings)) {
     game.disputeRulings = [];
@@ -1646,10 +1647,10 @@ function submitRuling(event) {
 
   const expId = currentRulingExpansionId || "";
   let entry = game.disputeRulings.find(
-    (r) => r.disputeText === currentRulingDisputeText && (r.expansionId || "") === expId
+    (r) => r.disputeText === disputeText && (r.expansionId || "") === expId
   );
   if (!entry) {
-    entry = { disputeText: currentRulingDisputeText, expansionId: expId, rulings: [] };
+    entry = { disputeText, expansionId: expId, rulings: [] };
     game.disputeRulings.push(entry);
   }
 
@@ -1663,7 +1664,7 @@ function submitRuling(event) {
 
   closeRulingDialog();
   renderAll();
-  showBackupMessage(`已为争议「${currentRulingDisputeText}」新增裁定。`, "success");
+  showBackupMessage(`已为争议「${disputeText}」新增裁定。`, "success");
 }
 
 els.rulingCancelBtn.addEventListener("click", closeRulingDialog);
