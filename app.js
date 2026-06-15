@@ -1661,7 +1661,8 @@ async function handleImportFile(file) {
     } catch {
       throw new Error("JSON 解析失败，请检查文件格式。");
     }
-    const migrated = runMigrations(parsed);
+    const importData = Array.isArray(parsed) ? { games: parsed } : parsed;
+    const migrated = runMigrations(importData);
     const games = validateImportData(migrated);
     showConfirm(
       "确认导入数据",
