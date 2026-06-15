@@ -1,10 +1,47 @@
 const storageKey = "zfl18-boardgame-rule-cards";
 const today = new Date();
 
+const REVIEW_STATUS = {
+  UNMARKED: null,
+  MASTERED: "mastered",
+  STILL_FORGET: "still_forget",
+  MUST_REVIEW: "must_review"
+};
+
+const REVIEW_STATUS_LABELS = {
+  [REVIEW_STATUS.MASTERED]: "已掌握",
+  [REVIEW_STATUS.STILL_FORGET]: "还会忘",
+  [REVIEW_STATUS.MUST_REVIEW]: "下次必看"
+};
+
+function normalizeRule(rule) {
+  if (typeof rule === "string") {
+    return { text: rule, status: REVIEW_STATUS.UNMARKED };
+  }
+  return {
+    text: rule?.text ?? "",
+    status: rule?.status ?? REVIEW_STATUS.UNMARKED
+  };
+}
+
+function normalizeRuleArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(normalizeRule);
+}
+
+function ruleText(rule) {
+  return typeof rule === "string" ? rule : rule?.text ?? "";
+}
+
+function ruleStatus(rule) {
+  return typeof rule === "string" ? REVIEW_STATUS.UNMARKED : rule?.status ?? REVIEW_STATUS.UNMARKED;
+}
+
 const defaultState = {
   selectedId: "",
   selectedChecklistIds: [],
   checklistPlayerFilter: "all",
+  filterMustReview: false,
   games: [
     {
       id: crypto.randomUUID(),
@@ -15,10 +52,10 @@ const defaultState = {
       complexity: "中",
       lastPlayed: "2025-11-20",
       cover: "",
-      forgets: ["商站建造前先确认道路或水路连接", "袋中随从抽完后不是重洗弃堆，而是从已回袋内容继续抽"],
-      disputes: ["事件顺序和玩家动作结算先后", "科技板是否能替代所有同类随从"],
-      setup: ["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"],
-      scoring: ["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"],
+      forgets: normalizeRuleArray(["商站建造前先确认道路或水路连接", "袋中随从抽完后不是重洗弃堆，而是从已回袋内容继续抽"]),
+      disputes: normalizeRuleArray(["事件顺序和玩家动作结算先后", "科技板是否能替代所有同类随从"]),
+      setup: normalizeRuleArray(["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"]),
+      scoring: normalizeRuleArray(["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"]),
       loanRecords: []
     },
     {
@@ -30,10 +67,10 @@ const defaultState = {
       complexity: "重",
       lastPlayed: "2025-08-02",
       cover: "",
-      forgets: ["联邦连接时卫星数量和能量消耗要一起核对", "研究升到顶必须拿对应科技板限制"],
-      disputes: ["被动充能是否能拒绝", "星球改造费用受哪些能力影响"],
-      setup: ["随机终局计分板和回合得分板", "按种族设置起始资源和母星"],
-      scoring: ["终局计分板", "科技轨排名", "联邦和建筑分"],
+      forgets: normalizeRuleArray(["联邦连接时卫星数量和能量消耗要一起核对", "研究升到顶必须拿对应科技板限制"]),
+      disputes: normalizeRuleArray(["被动充能是否能拒绝", "星球改造费用受哪些能力影响"]),
+      setup: normalizeRuleArray(["随机终局计分板和回合得分板", "按种族设置起始资源和母星"]),
+      scoring: normalizeRuleArray(["终局计分板", "科技轨排名", "联邦和建筑分"]),
       loanRecords: []
     },
     {
@@ -45,10 +82,10 @@ const defaultState = {
       complexity: "轻",
       lastPlayed: "2026-03-15",
       cover: "",
-      forgets: ["每轮结束先铺墙再补工厂展示区", "地板线扣分后清空对应砖"],
-      disputes: ["同色砖放置限制是否看整面墙", "中央区起始玩家标记是否必须拿"],
-      setup: ["按人数放工厂圆盘", "每个圆盘补4块砖"],
-      scoring: ["横竖相邻即时分", "完整行列和颜色终局加分"],
+      forgets: normalizeRuleArray(["每轮结束先铺墙再补工厂展示区", "地板线扣分后清空对应砖"]),
+      disputes: normalizeRuleArray(["同色砖放置限制是否看整面墙", "中央区起始玩家标记是否必须拿"]),
+      setup: normalizeRuleArray(["按人数放工厂圆盘", "每个圆盘补4块砖"]),
+      scoring: normalizeRuleArray(["横竖相邻即时分", "完整行列和颜色终局加分"]),
       loanRecords: []
     }
   ]
@@ -62,6 +99,7 @@ const els = {
   playerFilter: document.querySelector("#playerFilter"),
   complexityFilter: document.querySelector("#complexityFilter"),
   sortMode: document.querySelector("#sortMode"),
+  filterMustReview: document.querySelector("#filterMustReview"),
   gameForm: document.querySelector("#gameForm"),
   nameInput: document.querySelector("#nameInput"),
   minPlayersInput: document.querySelector("#minPlayersInput"),
@@ -75,6 +113,7 @@ const els = {
   gameCount: document.querySelector("#gameCount"),
   ruleCount: document.querySelector("#ruleCount"),
   staleGame: document.querySelector("#staleGame"),
+  reviewPendingCount: document.querySelector("#reviewPendingCount"),
   visibleCount: document.querySelector("#visibleCount"),
   exportBtn: document.querySelector("#exportBtn"),
   importBtn: document.querySelector("#importBtn"),
@@ -114,7 +153,11 @@ function loadState() {
     const games = Array.isArray(parsed.games)
       ? parsed.games.map((game) => ({
           ...game,
-          loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : []
+          loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : [],
+          forgets: normalizeRuleArray(game.forgets),
+          disputes: normalizeRuleArray(game.disputes),
+          setup: normalizeRuleArray(game.setup),
+          scoring: normalizeRuleArray(game.scoring)
         }))
       : structuredClone(defaultState).games;
     return {
@@ -122,7 +165,8 @@ function loadState() {
       ...parsed,
       games,
       selectedChecklistIds: Array.isArray(parsed.selectedChecklistIds) ? parsed.selectedChecklistIds : [],
-      checklistPlayerFilter: parsed.checklistPlayerFilter || "all"
+      checklistPlayerFilter: parsed.checklistPlayerFilter || "all",
+      filterMustReview: parsed.filterMustReview || false
     };
   } catch {
     return structuredClone(defaultState);
@@ -170,16 +214,69 @@ function getAllRules(game) {
   return [...game.forgets, ...game.disputes, ...game.setup, ...game.scoring];
 }
 
+function getAllRuleObjects() {
+  return state.games.flatMap((game) => getAllRules(game));
+}
+
+function countRulesByStatus(status) {
+  return getAllRuleObjects().filter((rule) => ruleStatus(rule) === status).length;
+}
+
+function getReviewPendingCount() {
+  const all = getAllRuleObjects();
+  return all.filter((rule) => {
+    const s = ruleStatus(rule);
+    return s === REVIEW_STATUS.UNMARKED || s === REVIEW_STATUS.STILL_FORGET || s === REVIEW_STATUS.MUST_REVIEW;
+  }).length;
+}
+
+function hasMustReviewRule(game) {
+  return getAllRules(game).some((rule) => ruleStatus(rule) === REVIEW_STATUS.MUST_REVIEW);
+}
+
+function setRuleStatus(gameId, ruleKey, ruleIndex, status) {
+  const game = state.games.find((g) => g.id === gameId);
+  if (!game) return;
+  const rules = game[ruleKey];
+  if (!rules || ruleIndex < 0 || ruleIndex >= rules.length) return;
+  const currentStatus = ruleStatus(rules[ruleIndex]);
+  if (currentStatus === status) {
+    rules[ruleIndex].status = REVIEW_STATUS.UNMARKED;
+  } else {
+    rules[ruleIndex].status = status;
+  }
+  saveState();
+}
+
+function getReviewProgress(game) {
+  const all = getAllRules(game);
+  if (all.length === 0) return { total: 0, mastered: 0, pending: 0, mustReview: 0 };
+  const mastered = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.MASTERED).length;
+  const mustReview = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW).length;
+  const stillForget = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.STILL_FORGET).length;
+  const unmarked = all.filter((r) => ruleStatus(r) === REVIEW_STATUS.UNMARKED).length;
+  return {
+    total: all.length,
+    mastered,
+    mustReview,
+    stillForget,
+    unmarked,
+    pending: stillForget + mustReview + unmarked
+  };
+}
+
 function getFilteredGames() {
   const keyword = els.searchInput.value.trim();
   const player = els.playerFilter.value;
   const complexity = els.complexityFilter.value;
+  const mustReviewOnly = els.filterMustReview && els.filterMustReview.checked;
   const games = state.games.filter((game) => {
-    const text = `${game.name}${getAllRules(game).join("")}`;
+    const text = `${game.name}${getAllRules(game).map(ruleText).join("")}`;
     const matchesKeyword = !keyword || text.includes(keyword);
     const matchesPlayer = player === "all" || (Number(player) >= game.minPlayers && Number(player) <= game.maxPlayers);
     const matchesComplexity = complexity === "all" || game.complexity === complexity;
-    return matchesKeyword && matchesPlayer && matchesComplexity;
+    const matchesMustReview = !mustReviewOnly || hasMustReviewRule(game);
+    return matchesKeyword && matchesPlayer && matchesComplexity && matchesMustReview;
   });
 
   if (els.sortMode.value === "name") return games.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
@@ -196,6 +293,25 @@ function renderSummary() {
   els.gameCount.textContent = state.games.length;
   els.ruleCount.textContent = allRuleCount;
   els.staleGame.textContent = stale ? `${daysSince(stale.lastPlayed)}天` : "-";
+  if (els.reviewPendingCount) {
+    els.reviewPendingCount.textContent = getReviewPendingCount();
+  }
+}
+
+function renderReviewProgressBadges(game) {
+  const progress = getReviewProgress(game);
+  if (progress.total === 0) return "";
+  const badges = [];
+  if (progress.mustReview > 0) {
+    badges.push(`<span class="review-badge must-review" title="下次必看">${progress.mustReview} 🔔</span>`);
+  }
+  if (progress.stillForget > 0) {
+    badges.push(`<span class="review-badge still-forget" title="还会忘">${progress.stillForget} 💭</span>`);
+  }
+  if (progress.mastered > 0) {
+    badges.push(`<span class="review-badge mastered" title="已掌握">${progress.mastered} ✅</span>`);
+  }
+  return badges.length > 0 ? `<div class="review-progress">${badges.join("")}</div>` : "";
 }
 
 function renderList() {
@@ -213,6 +329,7 @@ function renderList() {
               ${currentLoan.borrower ? ` · ${escapeHtml(currentLoan.borrower)}` : ""}
             </span>`
           : "";
+        const progressBadges = renderReviewProgressBadges(game);
         return `
           <article class="game-card ${selected}" data-game-id="${game.id}">
             <div class="cover ${currentLoan ? "on-loan" : ""}">
@@ -231,6 +348,7 @@ function renderList() {
                 <span class="pill">${game.duration}分钟</span>
                 <span class="pill heavy">${escapeHtml(game.complexity)}</span>
               </div>
+              ${progressBadges}
             </div>
           </article>
         `;
@@ -278,6 +396,41 @@ function renderLoanStatus(game) {
   `;
 }
 
+function renderReviewSummary(game) {
+  const progress = getReviewProgress(game);
+  if (progress.total === 0) return "";
+  return `
+    <section class="review-summary">
+      <h3>📖 复习进度</h3>
+      <div class="review-stats">
+        <div class="review-stat">
+          <span class="review-stat-value">${progress.total}</span>
+          <span class="review-stat-label">总规则</span>
+        </div>
+        <div class="review-stat">
+          <span class="review-stat-value mastered">${progress.mastered}</span>
+          <span class="review-stat-label">已掌握</span>
+        </div>
+        <div class="review-stat">
+          <span class="review-stat-value still-forget">${progress.stillForget}</span>
+          <span class="review-stat-label">还会忘</span>
+        </div>
+        <div class="review-stat">
+          <span class="review-stat-value must-review">${progress.mustReview}</span>
+          <span class="review-stat-label">下次必看</span>
+        </div>
+        <div class="review-stat">
+          <span class="review-stat-value pending">${progress.pending}</span>
+          <span class="review-stat-label">待复习</span>
+        </div>
+      </div>
+      <div class="review-progress-bar">
+        <div class="review-progress-fill" style="width: ${progress.total > 0 ? (progress.mastered / progress.total) * 100 : 0}%"></div>
+      </div>
+    </section>
+  `;
+}
+
 function renderDetail() {
   const game = state.games.find((item) => item.id === state.selectedId) || state.games[0];
   if (!game) {
@@ -299,6 +452,7 @@ function renderDetail() {
           <span class="pill">${daysSince(game.lastPlayed)}天未玩</span>
         </div>
       </div>
+      ${renderReviewSummary(game)}
       ${renderLoanStatus(game)}
       ${renderRuleSection("容易忘的规则", "forgets", game.forgets)}
       ${renderRuleSection("常见争议", "disputes", game.disputes)}
@@ -322,6 +476,21 @@ function renderDetail() {
   `;
 }
 
+function renderStatusButtons(gameId, ruleKey, ruleIndex, currentStatus) {
+  const statuses = [
+    { value: REVIEW_STATUS.MASTERED, label: "已掌握", icon: "✅" },
+    { value: REVIEW_STATUS.STILL_FORGET, label: "还会忘", icon: "💭" },
+    { value: REVIEW_STATUS.MUST_REVIEW, label: "下次必看", icon: "🔔" }
+  ];
+  return statuses
+    .map((s) => {
+      const active = currentStatus === s.value ? "active" : "";
+      return `<button type="button" class="status-btn ${active} ${s.value}" title="${s.label}" 
+        data-status="${s.value}" data-rule-game="${gameId}" data-rule-key="${ruleKey}" data-rule-index="${ruleIndex}">${s.icon}</button>`;
+    })
+    .join("");
+}
+
 function renderRuleSection(title, key, items) {
   return `
     <section class="rule-section">
@@ -330,12 +499,23 @@ function renderRuleSection(title, key, items) {
         ${
           items
             .map(
-              (item, index) => `
-                <li>
-                  <span>${escapeHtml(item)}</span>
-                  <button type="button" title="删除" data-rule-key="${key}" data-rule-index="${index}">×</button>
+              (item, index) => {
+                const text = ruleText(item);
+                const status = ruleStatus(item);
+                const statusClass = status ? `status-${status}` : "";
+                return `
+                <li class="${statusClass}">
+                  <div class="rule-content">
+                    <span class="rule-text">${escapeHtml(text)}</span>
+                    ${status ? `<span class="rule-status-label">${REVIEW_STATUS_LABELS[status]}</span>` : ""}
+                  </div>
+                  <div class="rule-actions">
+                    ${renderStatusButtons(state.selectedId, key, index, status)}
+                    <button type="button" class="delete-btn" title="删除" data-rule-key="${key}" data-rule-index="${index}">×</button>
+                  </div>
                 </li>
-              `
+              `;
+              }
             )
             .join("") || `<li><span>暂无内容。</span></li>`
         }
@@ -396,13 +576,13 @@ function renderChecklist() {
   const sectionsHtml = selectedGames
     .map((game) => {
       const forgetsHtml = game.forgets.length
-        ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${game.forgets.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>`
+        ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${game.forgets.map((f) => `<li>${escapeHtml(ruleText(f))}</li>`).join("")}</ul></div>`
         : "";
       const setupHtml = game.setup.length
-        ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${game.setup.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div>`
+        ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${game.setup.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
         : "";
       const scoringHtml = game.scoring.length
-        ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${game.scoring.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul></div>`
+        ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${game.scoring.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
         : "";
 
       return `
@@ -429,6 +609,9 @@ function renderChecklist() {
 
 function renderAll() {
   saveState();
+  if (els.filterMustReview) {
+    els.filterMustReview.checked = state.filterMustReview;
+  }
   renderSummary();
   renderList();
   renderDetail();
@@ -462,10 +645,10 @@ async function addGame(event) {
     complexity: els.complexityInput.value,
     lastPlayed: els.lastPlayedInput.value,
     cover,
-    forgets: ["本局开始前先补充容易忘的规则。"],
-    disputes: [],
-    setup: ["整理组件并按人数调整初始设置。"],
-    scoring: ["确认终局计分项和即时得分项。"],
+    forgets: normalizeRuleArray(["本局开始前先补充容易忘的规则。"]),
+    disputes: normalizeRuleArray([]),
+    setup: normalizeRuleArray(["整理组件并按人数调整初始设置。"]),
+    scoring: normalizeRuleArray(["确认终局计分项和即时得分项。"]),
     loanRecords: []
   };
   state.games.unshift(game);
@@ -494,6 +677,12 @@ els.searchInput.addEventListener("input", renderAll);
 els.playerFilter.addEventListener("change", renderAll);
 els.complexityFilter.addEventListener("change", renderAll);
 els.sortMode.addEventListener("change", renderAll);
+if (els.filterMustReview) {
+  els.filterMustReview.addEventListener("change", () => {
+    state.filterMustReview = els.filterMustReview.checked;
+    renderAll();
+  });
+}
 els.gameForm.addEventListener("submit", addGame);
 
 els.gameList.addEventListener("click", (event) => {
@@ -511,16 +700,27 @@ els.detailView.addEventListener("submit", (event) => {
   const key = document.querySelector("#ruleTypeInput").value;
   const text = document.querySelector("#ruleTextInput").value.trim();
   if (!text) return;
-  game[key].push(text);
+  game[key].push(normalizeRule(text));
   renderAll();
 });
 
 els.detailView.addEventListener("click", (event) => {
-  const ruleButton = event.target.closest("[data-rule-key]");
+  const statusButton = event.target.closest("[data-status]");
+  const ruleButton = event.target.closest(".delete-btn[data-rule-key]");
   const playedButton = event.target.closest("#playedTodayBtn");
   const deleteButton = event.target.closest("#deleteGameBtn");
   const game = state.games.find((item) => item.id === state.selectedId);
   if (!game) return;
+
+  if (statusButton) {
+    const gameId = statusButton.dataset.ruleGame;
+    const key = statusButton.dataset.ruleKey;
+    const index = Number(statusButton.dataset.ruleIndex);
+    const status = statusButton.dataset.status;
+    setRuleStatus(gameId, key, index, status);
+    renderAll();
+    return;
+  }
 
   if (ruleButton) {
     const key = ruleButton.dataset.ruleKey;
@@ -652,10 +852,10 @@ async function handleImportFile(file) {
           complexity: ["轻", "中", "重"].includes(game.complexity) ? game.complexity : "中",
           lastPlayed: String(game.lastPlayed || new Date().toISOString().slice(0, 10)),
           cover: String(game.cover || ""),
-          forgets: Array.isArray(game.forgets) ? game.forgets.map(String) : [],
-          disputes: Array.isArray(game.disputes) ? game.disputes.map(String) : [],
-          setup: Array.isArray(game.setup) ? game.setup.map(String) : [],
-          scoring: Array.isArray(game.scoring) ? game.scoring.map(String) : [],
+          forgets: normalizeRuleArray(game.forgets),
+          disputes: normalizeRuleArray(game.disputes),
+          setup: normalizeRuleArray(game.setup),
+          scoring: normalizeRuleArray(game.scoring),
           loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : []
         }));
         state.selectedId = state.games[0]?.id || "";
