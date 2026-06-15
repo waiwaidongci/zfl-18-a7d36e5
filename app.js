@@ -1079,9 +1079,9 @@ const RULE_CONTAINER_MAP = {
   scoring: "editScoringContainer"
 };
 
-function renderEditRuleItem(ruleKey, index, ruleText) {
+function renderEditRuleItem(ruleKey, originalIndex, ruleText) {
   return `
-    <div class="edit-rule-item" data-rule-key="${ruleKey}" data-rule-index="${index}">
+    <div class="edit-rule-item" data-rule-key="${ruleKey}" data-rule-index="${originalIndex}">
       <textarea class="edit-rule-textarea" placeholder="请输入规则内容" rows="2">${escapeHtml(ruleText)}</textarea>
       <button type="button" class="edit-remove-rule-btn" title="删除此条">×</button>
     </div>
@@ -1103,11 +1103,16 @@ function collectEditRules() {
     const containerKey = RULE_CONTAINER_MAP[ruleKey];
     const container = els[containerKey];
     if (!container) continue;
-    const textareas = container.querySelectorAll(".edit-rule-textarea");
-    textareas.forEach((ta) => {
+    const items = container.querySelectorAll(".edit-rule-item");
+    items.forEach((item) => {
+      const ta = item.querySelector(".edit-rule-textarea");
+      if (!ta) return;
       const text = ta.value.trim();
       if (text) {
-        result[ruleKey].push(normalizeRule(text));
+        const originalIndex = Number(item.dataset.ruleIndex);
+        const originalRule = Number.isInteger(originalIndex) ? editSnapshot?.[ruleKey]?.[originalIndex] : undefined;
+        const nextRule = originalRule === undefined ? normalizeRule(text) : { ...normalizeRule(originalRule), text };
+        result[ruleKey].push(nextRule);
       }
     });
   }
@@ -1187,9 +1192,8 @@ els.editForm.addEventListener("click", (e) => {
     const containerKey = RULE_CONTAINER_MAP[ruleKey];
     const container = els[containerKey];
     if (!container) return;
-    const currentCount = container.querySelectorAll(".edit-rule-item").length;
     const newItem = document.createElement("div");
-    newItem.innerHTML = renderEditRuleItem(ruleKey, currentCount, "");
+    newItem.innerHTML = renderEditRuleItem(ruleKey, "", "");
     container.appendChild(newItem.firstElementChild);
     return;
   }
