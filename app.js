@@ -18,7 +18,8 @@ const defaultState = {
       forgets: ["商站建造前先确认道路或水路连接", "袋中随从抽完后不是重洗弃堆，而是从已回袋内容继续抽"],
       disputes: ["事件顺序和玩家动作结算先后", "科技板是否能替代所有同类随从"],
       setup: ["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"],
-      scoring: ["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"]
+      scoring: ["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"],
+      loanRecords: []
     },
     {
       id: crypto.randomUUID(),
@@ -32,7 +33,8 @@ const defaultState = {
       forgets: ["联邦连接时卫星数量和能量消耗要一起核对", "研究升到顶必须拿对应科技板限制"],
       disputes: ["被动充能是否能拒绝", "星球改造费用受哪些能力影响"],
       setup: ["随机终局计分板和回合得分板", "按种族设置起始资源和母星"],
-      scoring: ["终局计分板", "科技轨排名", "联邦和建筑分"]
+      scoring: ["终局计分板", "科技轨排名", "联邦和建筑分"],
+      loanRecords: []
     },
     {
       id: crypto.randomUUID(),
@@ -46,7 +48,8 @@ const defaultState = {
       forgets: ["每轮结束先铺墙再补工厂展示区", "地板线扣分后清空对应砖"],
       disputes: ["同色砖放置限制是否看整面墙", "中央区起始玩家标记是否必须拿"],
       setup: ["按人数放工厂圆盘", "每个圆盘补4块砖"],
-      scoring: ["横竖相邻即时分", "完整行列和颜色终局加分"]
+      scoring: ["横竖相邻即时分", "完整行列和颜色终局加分"],
+      loanRecords: []
     }
   ]
 };
@@ -88,7 +91,19 @@ const els = {
   checklistView: document.querySelector("#checklistView"),
   checklistSelectedCount: document.querySelector("#checklistSelectedCount"),
   clearChecklistBtn: document.querySelector("#clearChecklistBtn"),
-  generateChecklistBtn: document.querySelector("#generateChecklistBtn")
+  generateChecklistBtn: document.querySelector("#generateChecklistBtn"),
+  loanDialog: document.querySelector("#loanDialog"),
+  loanDialogTitle: document.querySelector("#loanDialogTitle"),
+  loanForm: document.querySelector("#loanForm"),
+  loanBorrowerInput: document.querySelector("#loanBorrowerInput"),
+  loanBorrowedAtInput: document.querySelector("#loanBorrowedAtInput"),
+  loanExpectedReturnInput: document.querySelector("#loanExpectedReturnInput"),
+  loanNotesInput: document.querySelector("#loanNotesInput"),
+  loanCancelBtn: document.querySelector("#loanCancelBtn"),
+  loanHistoryDialog: document.querySelector("#loanHistoryDialog"),
+  loanHistoryTitle: document.querySelector("#loanHistoryTitle"),
+  loanHistoryContent: document.querySelector("#loanHistoryContent"),
+  loanHistoryCloseBtn: document.querySelector("#loanHistoryCloseBtn")
 };
 
 function loadState() {
@@ -96,15 +111,50 @@ function loadState() {
   if (!saved) return structuredClone(defaultState);
   try {
     const parsed = JSON.parse(saved);
+    const games = Array.isArray(parsed.games)
+      ? parsed.games.map((game) => ({
+          ...game,
+          loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : []
+        }))
+      : structuredClone(defaultState).games;
     return {
       ...structuredClone(defaultState),
       ...parsed,
+      games,
       selectedChecklistIds: Array.isArray(parsed.selectedChecklistIds) ? parsed.selectedChecklistIds : [],
       checklistPlayerFilter: parsed.checklistPlayerFilter || "all"
     };
   } catch {
     return structuredClone(defaultState);
   }
+}
+
+function getCurrentLoan(game) {
+  if (!game || !Array.isArray(game.loanRecords)) return null;
+  return game.loanRecords.find((record) => !record.returnedAt) || null;
+}
+
+function getSortedLoanRecords(game) {
+  if (!game || !Array.isArray(game.loanRecords)) return [];
+  return [...game.loanRecords].sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "-";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function daysBetween(fromStr, toStr) {
+  const from = new Date(`${fromStr}T00:00:00`);
+  const to = new Date(`${toStr}T00:00:00`);
+  return Math.floor((to - from) / 86400000);
+}
+
+function isOverdue(loan) {
+  if (!loan || !loan.expectedReturnAt || loan.returnedAt) return false;
+  return daysBetween(loan.expectedReturnAt, new Date().toISOString().slice(0, 10)) > 0;
 }
 
 function saveState() {
@@ -155,15 +205,24 @@ function renderList() {
     games
       .map((game) => {
         const selected = game.id === state.selectedId ? "selected" : "";
+        const currentLoan = getCurrentLoan(game);
+        const overdue = currentLoan && isOverdue(currentLoan);
+        const loanBadge = currentLoan
+          ? `<span class="loan-ribbon ${overdue ? "overdue" : ""}">
+              ${overdue ? "⚠️ 逾期未还" : "📤 已借出"}
+              ${currentLoan.borrower ? ` · ${escapeHtml(currentLoan.borrower)}` : ""}
+            </span>`
+          : "";
         return `
           <article class="game-card ${selected}" data-game-id="${game.id}">
-            <div class="cover">
+            <div class="cover ${currentLoan ? "on-loan" : ""}">
               ${
                 game.cover
                   ? `<img src="${game.cover}" alt="${escapeHtml(game.name)}封面" />`
                   : `<span>${escapeHtml(game.name.slice(0, 2))}</span>`
               }
               <span class="stale-ribbon">${daysSince(game.lastPlayed)}天未玩</span>
+              ${loanBadge}
             </div>
             <div class="game-body">
               <h3>${escapeHtml(game.name)}</h3>
@@ -177,6 +236,46 @@ function renderList() {
         `;
       })
       .join("") || `<p class="empty">没有符合筛选的桌游。</p>`;
+}
+
+function renderLoanStatus(game) {
+  const currentLoan = getCurrentLoan(game);
+  if (!currentLoan) {
+    return `
+      <section class="loan-section">
+        <h3>📚 借出状态</h3>
+        <div class="loan-status available">
+          <span class="loan-status-icon">✅</span>
+          <span class="loan-status-text">当前在馆，可随时借出</span>
+        </div>
+        <div class="loan-actions">
+          <button id="loanOutBtn" type="button" class="primary">借出桌游</button>
+          <button id="viewLoanHistoryBtn" type="button">查看借出记录</button>
+        </div>
+      </section>
+    `;
+  }
+  const overdue = isOverdue(currentLoan);
+  const borrowedDays = daysBetween(currentLoan.borrowedAt, new Date().toISOString().slice(0, 10));
+  return `
+    <section class="loan-section">
+      <h3>📚 借出状态</h3>
+      <div class="loan-status ${overdue ? "overdue" : "on-loan"}">
+        <span class="loan-status-icon">${overdue ? "⚠️" : "📤"}</span>
+        <div class="loan-status-text">
+          <strong>${overdue ? "已逾期未还" : "已借出"}</strong>
+          ${currentLoan.borrower ? `<span>借给：${escapeHtml(currentLoan.borrower)}</span>` : ""}
+          <span>借出日期：${formatDate(currentLoan.borrowedAt)}（已借出 ${borrowedDays} 天）</span>
+          ${currentLoan.expectedReturnAt ? `<span>预计归还：${formatDate(currentLoan.expectedReturnAt)}</span>` : ""}
+          ${currentLoan.notes ? `<span class="loan-notes">备注：${escapeHtml(currentLoan.notes)}</span>` : ""}
+        </div>
+      </div>
+      <div class="loan-actions">
+        <button id="returnBtn" type="button" class="primary">标记归还</button>
+        <button id="viewLoanHistoryBtn" type="button">查看借出记录</button>
+      </div>
+    </section>
+  `;
 }
 
 function renderDetail() {
@@ -200,6 +299,7 @@ function renderDetail() {
           <span class="pill">${daysSince(game.lastPlayed)}天未玩</span>
         </div>
       </div>
+      ${renderLoanStatus(game)}
       ${renderRuleSection("容易忘的规则", "forgets", game.forgets)}
       ${renderRuleSection("常见争议", "disputes", game.disputes)}
       ${renderRuleSection("开局准备", "setup", game.setup)}
@@ -365,7 +465,8 @@ async function addGame(event) {
     forgets: ["本局开始前先补充容易忘的规则。"],
     disputes: [],
     setup: ["整理组件并按人数调整初始设置。"],
-    scoring: ["确认终局计分项和即时得分项。"]
+    scoring: ["确认终局计分项和即时得分项。"],
+    loanRecords: []
   };
   state.games.unshift(game);
   state.selectedId = game.id;
@@ -554,7 +655,8 @@ async function handleImportFile(file) {
           forgets: Array.isArray(game.forgets) ? game.forgets.map(String) : [],
           disputes: Array.isArray(game.disputes) ? game.disputes.map(String) : [],
           setup: Array.isArray(game.setup) ? game.setup.map(String) : [],
-          scoring: Array.isArray(game.scoring) ? game.scoring.map(String) : []
+          scoring: Array.isArray(game.scoring) ? game.scoring.map(String) : [],
+          loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : []
         }));
         state.selectedId = state.games[0]?.id || "";
         renderAll();
@@ -620,4 +722,131 @@ els.generateChecklistBtn.addEventListener("click", () => {
   }
   renderChecklist();
   els.checklistView.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+function openLoanDialog() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  if (getCurrentLoan(game)) {
+    showBackupMessage("该桌游当前已借出，请先标记归还。", "error");
+    return;
+  }
+  els.loanDialogTitle.textContent = `借出：${game.name}`;
+  els.loanBorrowerInput.value = "";
+  els.loanBorrowedAtInput.value = new Date().toISOString().slice(0, 10);
+  const expectedDate = new Date();
+  expectedDate.setDate(expectedDate.getDate() + 14);
+  els.loanExpectedReturnInput.value = expectedDate.toISOString().slice(0, 10);
+  els.loanNotesInput.value = "";
+  els.loanDialog.classList.remove("hidden");
+}
+
+function closeLoanDialog() {
+  els.loanDialog.classList.add("hidden");
+}
+
+function submitLoan(event) {
+  event.preventDefault();
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  const borrower = els.loanBorrowerInput.value.trim();
+  const borrowedAt = els.loanBorrowedAtInput.value;
+  const expectedReturnAt = els.loanExpectedReturnInput.value;
+  const notes = els.loanNotesInput.value.trim();
+  if (!borrower || !borrowedAt) return;
+  game.loanRecords.push({
+    id: crypto.randomUUID(),
+    borrower,
+    borrowedAt,
+    expectedReturnAt,
+    notes,
+    returnedAt: null
+  });
+  closeLoanDialog();
+  renderAll();
+  showBackupMessage(`已将《${game.name}》借给 ${borrower}。`, "success");
+}
+
+function markReturned() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  const currentLoan = getCurrentLoan(game);
+  if (!currentLoan) return;
+  showConfirm(
+    "标记归还",
+    `确定要将《${game.name}》标记为已归还吗？`,
+    () => {
+      currentLoan.returnedAt = new Date().toISOString().slice(0, 10);
+      renderAll();
+      showBackupMessage(`《${game.name}》已标记归还。`, "success");
+    }
+  );
+}
+
+function renderLoanHistory() {
+  const game = state.games.find((item) => item.id === state.selectedId);
+  if (!game) return;
+  const records = getSortedLoanRecords(game);
+  els.loanHistoryTitle.textContent = `《${game.name}》借出记录`;
+  if (records.length === 0) {
+    els.loanHistoryContent.innerHTML = `<p class="loan-history-empty">暂无借出记录。</p>`;
+  } else {
+    els.loanHistoryContent.innerHTML = records
+      .map((record) => {
+        const isActive = !record.returnedAt;
+        const overdue = isActive && isOverdue(record);
+        const borrowedDays = record.returnedAt
+          ? daysBetween(record.borrowedAt, record.returnedAt)
+          : daysBetween(record.borrowedAt, new Date().toISOString().slice(0, 10));
+        return `
+          <div class="loan-history-item ${isActive ? "active" : ""} ${overdue ? "overdue" : ""}">
+            <div class="loan-history-header">
+              <span class="loan-history-status ${isActive ? (overdue ? "overdue" : "active") : "returned"}">
+                ${isActive ? (overdue ? "⚠️ 逾期未还" : "📤 借出中") : "✅ 已归还"}
+              </span>
+              ${record.borrower ? `<strong class="loan-history-borrower">${escapeHtml(record.borrower)}</strong>` : ""}
+            </div>
+            <div class="loan-history-dates">
+              <span>借出：${formatDate(record.borrowedAt)}</span>
+              ${record.expectedReturnAt ? `<span>预计归还：${formatDate(record.expectedReturnAt)}</span>` : ""}
+              ${record.returnedAt ? `<span>实际归还：${formatDate(record.returnedAt)}</span>` : ""}
+              <span>时长：${borrowedDays} 天</span>
+            </div>
+            ${record.notes ? `<div class="loan-history-notes">备注：${escapeHtml(record.notes)}</div>` : ""}
+          </div>
+        `;
+      })
+      .join("");
+  }
+  els.loanHistoryDialog.classList.remove("hidden");
+}
+
+function closeLoanHistoryDialog() {
+  els.loanHistoryDialog.classList.add("hidden");
+}
+
+els.detailView.addEventListener("click", (event) => {
+  const loanOutBtn = event.target.closest("#loanOutBtn");
+  const returnBtn = event.target.closest("#returnBtn");
+  const viewHistoryBtn = event.target.closest("#viewLoanHistoryBtn");
+  if (loanOutBtn) {
+    openLoanDialog();
+  }
+  if (returnBtn) {
+    markReturned();
+  }
+  if (viewHistoryBtn) {
+    renderLoanHistory();
+  }
+});
+
+els.loanCancelBtn.addEventListener("click", closeLoanDialog);
+els.loanForm.addEventListener("submit", submitLoan);
+els.loanDialog.addEventListener("click", (e) => {
+  if (e.target === els.loanDialog) closeLoanDialog();
+});
+
+els.loanHistoryCloseBtn.addEventListener("click", closeLoanHistoryDialog);
+els.loanHistoryDialog.addEventListener("click", (e) => {
+  if (e.target === els.loanHistoryDialog) closeLoanHistoryDialog();
 });

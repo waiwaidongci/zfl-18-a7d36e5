@@ -111,6 +111,46 @@
         </div>
       </div>
 
+      <div id="loanDialog" class="dialog-overlay hidden">
+        <div class="dialog loan-dialog">
+          <h3 id="loanDialogTitle">借出桌游</h3>
+          <form id="loanForm" class="loan-form">
+            <label>
+              借给谁
+              <input id="loanBorrowerInput" type="text" placeholder="请输入借阅人姓名" required />
+            </label>
+            <div class="split">
+              <label>
+                借出日期
+                <input id="loanBorrowedAtInput" type="date" required />
+              </label>
+              <label>
+                预计归还日期
+                <input id="loanExpectedReturnInput" type="date" />
+              </label>
+            </div>
+            <label>
+              备注
+              <textarea id="loanNotesInput" rows="3" placeholder="可选，记录一些特殊情况"></textarea>
+            </label>
+            <div class="dialog-actions">
+              <button id="loanCancelBtn" type="button">取消</button>
+              <button id="loanSubmitBtn" type="submit" class="primary">确认借出</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="loanHistoryDialog" class="dialog-overlay hidden">
+        <div class="dialog loan-history-dialog">
+          <h3 id="loanHistoryTitle">借出记录</h3>
+          <div id="loanHistoryContent" class="loan-history-content"></div>
+          <div class="dialog-actions">
+            <button id="loanHistoryCloseBtn" type="button" class="primary">关闭</button>
+          </div>
+        </div>
+      </div>
+
       <section class="layout">
         <aside class="panel">
           <h2>新增桌游</h2>
