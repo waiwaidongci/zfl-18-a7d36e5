@@ -3453,6 +3453,7 @@ function createEmptyPartyState() {
 function createEmptyPlayer(index) {
   return {
     id: generateId(),
+    index,
     name: PARTY_DEFAULT_PLAYER_NAMES[index] || `玩家${index + 1}`,
     dislikedComplexity: [],
     familiarGameIds: []
@@ -3674,11 +3675,367 @@ function calculateGameScore(game, players) {
   return { score, reasons, warnings };
 }
 
-function generatePartyRecommendations() {
+function needsSplitTable(candidateGames, totalPlayers) {
+  const maxMaxPlayers = Math.max(...candidateGames.map((g) => g.maxPlayers));
+  return totalPlayers > maxMaxPlayers;
+}
+
+function getPlayerSubsets(players, tableCount) {
+  const subsets = [];
+  const n = players.length;
+  const baseSize = Math.floor(n / tableCount);
+  const remainder = n % tableCount;
+
+  let startIndex = 0;
+  for (let i = 0; i < tableCount; i++) {
+    const size = baseSize + (i < remainder ? 1 : 0);
+    subsets.push(players.slice(startIndex, startIndex + size));
+    startIndex += size;
+  }
+  return subsets;
+}
+
+function getAllPlayerPermutations(players) {
+  if (players.length <= 1) return [players];
+  const result = [];
+  for (let i = 0; i < players.length; i++) {
+    const rest = [...players.slice(0, i), ...players.slice(i + 1)];
+    const perms = getAllPlayerPermutations(rest);
+    for (const perm of perms) {
+      result.push([players[i], ...perm]);
+    }
+  }
+  return result;
+}
+
+function calculateTableScore(game, tablePlayers) {
+  const reasons = [];
+  const warnings = [];
+  let score = 0;
+
+  const tablePlayerCount = tablePlayers.length;
+
+  if (tablePlayerCount >= game.minPlayers && tablePlayerCount <= game.maxPlayers) {
+    score += 35;
+    reasons.push(`人数完美匹配：本桌 ${tablePlayerCount} 人，游戏支持 ${game.minPlayers}-${game.maxPlayers} 人`);
+  } else if (tablePlayerCount < game.minPlayers) {
+    warnings.push(`人数略少：本桌 ${tablePlayerCount} 人，游戏最少需要 ${game.minPlayers} 人，可考虑合并或调整`);
+    score -= 25;
+  } else {
+    warnings.push(`人数略多：本桌 ${tablePlayerCount} 人，游戏最多支持 ${game.maxPlayers} 人，可能需要轮替或旁观`);
+    score -= 15;
+  }
+
+  const dislikedByCount = tablePlayers.filter((p) => p.dislikedComplexity.includes(game.complexity)).length;
+  if (dislikedByCount === 0) {
+    score += 20;
+    reasons.push(`复杂度适配：本桌玩家都能接受 ${game.complexity} 度游戏`);
+  } else {
+    const dislikedNames = tablePlayers.filter((p) => p.dislikedComplexity.includes(game.complexity)).map((p) => p.name).join("、");
+    warnings.push(`复杂度偏好：${dislikedNames} 不太喜欢 ${game.complexity} 度游戏`);
+    score -= dislikedByCount * 10;
+  }
+
+  const familiarCount = tablePlayers.filter((p) => p.familiarGameIds.includes(game.id)).length;
+  if (familiarCount === tablePlayers.length) {
+    score += 18;
+    reasons.push(`全员熟练：本桌所有人都玩过，开局流畅`);
+  } else if (familiarCount > 0) {
+    score += familiarCount * 4;
+    const familiarNames = tablePlayers.filter((p) => p.familiarGameIds.includes(game.id)).map((p) => p.name).join("、");
+    reasons.push(`${familiarCount}/${tablePlayerCount} 人熟悉：${familiarNames} 可以带领新玩家`);
+  } else {
+    warnings.push(`全员陌生：本桌没有人玩过，需要预留 15-20 分钟教学时间`);
+    score -= 5;
+  }
+
+  if (familiarCount > 0 && familiarCount < tablePlayers.length) {
+    score += 5;
+    reasons.push(`有老手带新手，适合边玩边学`);
+  }
+
+  const totalRules = getAllRulesIncludingExpansions(game).length;
+  if (totalRules === 0) {
+    score += 5;
+    reasons.push(`规则简单：暂无需要复习的遗忘点`);
+  } else if (totalRules <= 3) {
+    score += 3;
+    reasons.push(`规则轻量：仅 ${totalRules} 条规则需要复习`);
+  } else {
+    score -= Math.min(8, totalRules - 3);
+    warnings.push(`规则较多：共 ${totalRules} 条规则/争议需要提前复习`);
+  }
+
+  const mustReviewCount = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW).length;
+  if (mustReviewCount > 0) {
+    warnings.push(`有 ${mustReviewCount} 条规则标记为「下次必看」，务必提前过一遍`);
+    score -= mustReviewCount * 3;
+  }
+
+  const staleDays = daysSince(game.lastPlayed);
+  if (staleDays <= 30) {
+    score += 8;
+    reasons.push(`热度保持：${staleDays} 天前刚玩过，印象深刻`);
+  } else if (staleDays <= 90) {
+    score += 3;
+    reasons.push(`记忆尚可：${staleDays} 天前玩过，复习一下就能回忆起来`);
+  } else {
+    warnings.push(`间隔较久：${staleDays} 天没玩了，很多细节可能遗忘，建议重点复习`);
+    score -= 3;
+  }
+
+  if (hasUnresolvedDisputes(game)) {
+    warnings.push(`存在未裁定争议，建议开局前先统一规则口径`);
+    score -= 5;
+  }
+
+  return { score, reasons, warnings };
+}
+
+function generateTableAssignments(candidateGames, players, tableCount) {
+  const minPlayersPerGame = Math.min(...candidateGames.map((g) => g.minPlayers));
+  const maxPlayersPerGame = Math.max(...candidateGames.map((g) => g.maxPlayers));
+  const totalPlayers = players.length;
+  const avgPlayers = totalPlayers / tableCount;
+
+  if (avgPlayers < minPlayersPerGame) {
+    return [];
+  }
+
+  const tableSizes = [];
+  const baseSize = Math.floor(avgPlayers);
+  const remainder = totalPlayers % tableCount;
+
+  for (let i = 0; i < tableCount; i++) {
+    const size = baseSize + (i < remainder ? 1 : 0);
+    if (size > maxPlayersPerGame || size < minPlayersPerGame) {
+      return [];
+    }
+    tableSizes.push(size);
+  }
+
+  const validGamesPerTable = tableSizes.map((size) =>
+    candidateGames.filter((g) => size >= g.minPlayers && size <= g.maxPlayers)
+  );
+
+  if (validGamesPerTable.some((games) => games.length === 0)) {
+    return [];
+  }
+
+  const plans = [];
+  const maxPlans = 5;
+
+  function generateCombinations(tableIndex, usedGameIds, currentPlan) {
+    if (plans.length >= maxPlans) return;
+
+    if (tableIndex === tableCount) {
+      plans.push([...currentPlan]);
+      return;
+    }
+
+    const availableGames = validGamesPerTable[tableIndex].filter((g) => !usedGameIds.has(g.id));
+
+    for (const game of availableGames) {
+      usedGameIds.add(game.id);
+      currentPlan.push({ tableIndex, game, playerCount: tableSizes[tableIndex] });
+      generateCombinations(tableIndex + 1, usedGameIds, currentPlan);
+      currentPlan.pop();
+      usedGameIds.delete(game.id);
+    }
+
+    if (usedGameIds.size < tableCount) {
+      for (const game of validGamesPerTable[tableIndex]) {
+        if (usedGameIds.has(game.id)) continue;
+        usedGameIds.add(game.id);
+        currentPlan.push({ tableIndex, game, playerCount: tableSizes[tableIndex] });
+        generateCombinations(tableIndex + 1, usedGameIds, currentPlan);
+        currentPlan.pop();
+        usedGameIds.delete(game.id);
+      }
+    }
+  }
+
+  generateCombinations(0, new Set(), []);
+  return plans;
+}
+
+function scoreSplitTablePlan(plan, players) {
+  const tableCount = plan.length;
+  const permutations = getAllPlayerPermutations(players);
+  const limitedPermutations = permutations.slice(0, Math.min(permutations.length, 24));
+
+  let bestScore = -Infinity;
+  let bestAssignment = null;
+
+  for (const perm of limitedPermutations) {
+    const subsets = getPlayerSubsets(perm, tableCount);
+    let totalScore = 0;
+    const tableResults = [];
+    const seenGameIds = new Set();
+    let duplicatePenalty = 0;
+
+    for (let i = 0; i < plan.length; i++) {
+      const { game } = plan[i];
+      const tablePlayers = subsets[i];
+
+      if (seenGameIds.has(game.id)) {
+        duplicatePenalty += 15;
+      }
+      seenGameIds.add(game.id);
+
+      const { score, reasons, warnings } = calculateTableScore(game, tablePlayers);
+      totalScore += score;
+      tableResults.push({
+        tableNumber: i + 1,
+        game,
+        players: tablePlayers,
+        score,
+        reasons,
+        warnings
+      });
+    }
+
+    totalScore -= duplicatePenalty;
+
+    const complexityBalance = calculateComplexityBalance(tableResults);
+    totalScore += complexityBalance;
+
+    const familiarityBalance = calculateFamiliarityBalance(tableResults);
+    totalScore += familiarityBalance;
+
+    if (totalScore > bestScore) {
+      bestScore = totalScore;
+      bestAssignment = {
+        plan,
+        tables: tableResults,
+        totalScore,
+        complexityScore: complexityBalance,
+        familiarityScore: familiarityBalance
+      };
+    }
+  }
+
+  return bestAssignment;
+}
+
+function calculateComplexityBalance(tableResults) {
+  const complexityRank = { "轻": 1, "中": 2, "重": 3 };
+  const complexities = tableResults.map((t) => complexityRank[t.game.complexity]);
+  const avg = complexities.reduce((a, b) => a + b, 0) / complexities.length;
+  const variance = complexities.reduce((sum, c) => sum + Math.pow(c - avg, 2), 0) / complexities.length;
+
+  if (variance === 0) return 10;
+  if (variance <= 0.5) return 5;
+  if (variance <= 1) return 0;
+  return -5;
+}
+
+function calculateFamiliarityBalance(tableResults) {
+  const familiarRatios = tableResults.map((t) => {
+    const familiarCount = t.players.filter((p) => p.familiarGameIds.includes(t.game.id)).length;
+    return familiarCount / t.players.length;
+  });
+  const avg = familiarRatios.reduce((a, b) => a + b, 0) / familiarRatios.length;
+  const variance = familiarRatios.reduce((sum, r) => sum + Math.pow(r - avg, 2), 0) / familiarRatios.length;
+
+  if (variance <= 0.1) return 10;
+  if (variance <= 0.2) return 5;
+  if (variance <= 0.3) return 0;
+  return -5;
+}
+
+function generateSplitTableRecommendations() {
   if (!partyState) return [];
 
   const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+  const players = partyState.players;
+  const totalPlayers = players.length;
   const tagFilter = state.partyTagFilter || "";
+
+  const filteredCandidates = tagFilter
+    ? candidateGames.filter((game) =>
+        getAllRulesIncludingExpansions(game).some((rule) => ruleTags(rule).includes(tagFilter))
+      )
+    : candidateGames;
+
+  if (filteredCandidates.length === 0) return [];
+
+  const maxTableCount = Math.min(filteredCandidates.length, Math.floor(totalPlayers / 2));
+  const allScoredPlans = [];
+
+  for (let tableCount = 2; tableCount <= maxTableCount; tableCount++) {
+    const gamePlans = generateTableAssignments(filteredCandidates, players, tableCount);
+    for (const plan of gamePlans) {
+      const scored = scoreSplitTablePlan(plan, players);
+      if (scored) {
+        allScoredPlans.push(scored);
+      }
+    }
+  }
+
+  allScoredPlans.sort((a, b) => b.totalScore - a.totalScore);
+
+  return allScoredPlans.slice(0, 3).map((plan, idx) => {
+    const reasons = [];
+    const warnings = [];
+
+    reasons.push(`分为 ${plan.tables.length} 桌同时进行，总人数 ${totalPlayers} 人全部参与`);
+
+    const avgTableSize = totalPlayers / plan.tables.length;
+    if (Math.abs(avgTableSize - Math.round(avgTableSize)) < 0.5) {
+      reasons.push(`人数分配均匀，每桌约 ${Math.round(avgTableSize)} 人`);
+    } else {
+      warnings.push(`人数分配略有不均，各桌人数差 1 人`);
+    }
+
+    if (plan.complexityScore >= 10) {
+      reasons.push(`复杂度搭配均衡，各桌体验一致`);
+    } else if (plan.complexityScore < 0) {
+      warnings.push(`各桌复杂度差异较大，注意照顾不同玩家偏好`);
+    }
+
+    if (plan.familiarityScore >= 10) {
+      reasons.push(`新老手搭配均衡，每桌都有合适的带领者`);
+    } else if (plan.familiarityScore < 0) {
+      warnings.push(`各桌熟练度差异较大，可能需要调整人员`);
+    }
+
+    const uniqueGames = new Set(plan.tables.map((t) => t.game.id));
+    if (uniqueGames.size === plan.tables.length) {
+      reasons.push(`每桌游戏不同，玩法丰富多样`);
+    } else {
+      warnings.push(`有重复游戏，可考虑调整增加多样性`);
+    }
+
+    return {
+      id: `plan-${idx}`,
+      tables: plan.tables,
+      totalScore: plan.totalScore,
+      reasons,
+      warnings,
+      rank: idx
+    };
+  });
+}
+
+function generatePartyRecommendations() {
+  if (!partyState) return { type: "single", recommendations: [] };
+
+  const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+  const totalPlayers = partyState.playerCount;
+  const tagFilter = state.partyTagFilter || "";
+
+  if (candidateGames.length === 0) {
+    return { type: "single", recommendations: [] };
+  }
+
+  if (needsSplitTable(candidateGames, totalPlayers)) {
+    const splitPlans = generateSplitTableRecommendations();
+    if (splitPlans.length > 0) {
+      return { type: "split", plans: splitPlans };
+    }
+  }
+
   const scored = candidateGames.map((game) => {
     const { score, reasons, warnings } = calculateGameScore(game, partyState.players);
     return { game, score, reasons, warnings };
@@ -3688,7 +4045,90 @@ function generatePartyRecommendations() {
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored;
+  return { type: "single", recommendations: scored };
+}
+
+function renderSplitTableCard(plan, rank) {
+  const { tables, totalScore, reasons, warnings } = plan;
+  const isTop = rank === 0;
+  const cardClass = isTop ? "recommended" : "alternative";
+  const badge = isTop
+    ? `<span class="party-rec-badge top">⭐ 首推方案</span>`
+    : `<span class="party-rec-badge alt">备选方案</span>`;
+
+  const reasonsHtml =
+    reasons.length > 0
+      ? `<div class="party-reasons"><h5>✅ 方案优势</h5><ul>${reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div>`
+      : "";
+
+  const warningsHtml =
+    warnings.length > 0
+      ? `<div class="party-warnings"><h5>⚠️ 注意事项</h5><ul>${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>`
+      : "";
+
+  const tablesHtml = tables.map((table) => {
+    const playerNames = table.players.map((p) => escapeHtml(p.name || `玩家${p.index + 1}`)).join("、");
+    const tableReasonsHtml =
+      table.reasons.length > 0
+        ? `<div class="party-reasons"><h5>推荐理由</h5><ul>${table.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div>`
+        : "";
+    const tableWarningsHtml =
+      table.warnings.length > 0
+        ? `<div class="party-warnings"><h5>风险提示</h5><ul>${table.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>`
+        : "";
+
+    return `
+      <div class="split-table-card" data-table-game="${table.game.id}">
+        <div class="split-table-header">
+          <div class="split-table-title">
+            <span class="split-table-number">第${table.tableNumber}桌</span>
+            <span class="split-table-game">${escapeHtml(table.game.name)}</span>
+          </div>
+          <div class="split-table-score">
+            评分 <strong>${table.score}</strong>
+          </div>
+        </div>
+        <div class="split-table-body">
+          <div class="party-rec-meta">
+            <span class="pill">${table.players.length}人</span>
+            <span class="pill">${table.game.minPlayers}-${table.game.maxPlayers}人上限</span>
+            <span class="pill">${table.game.duration}分钟</span>
+            <span class="pill heavy">${escapeHtml(table.game.complexity)}</span>
+          </div>
+          <div class="split-table-players">
+            <span class="split-table-players-label">👥 玩家：</span>
+            <span class="split-table-players-names">${playerNames}</span>
+          </div>
+          ${tableReasonsHtml}
+          ${tableWarningsHtml}
+          <div style="margin-top:8px;">
+            <button type="button" class="party-jump-to-detail text-btn" data-game-id="${table.game.id}">📖 查看《${escapeHtml(table.game.name)}》详情 & 规则 →</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="party-rec-card party-split-card ${cardClass}" data-party-plan="${plan.id}">
+      <div class="party-rec-header">
+        <div class="party-rec-title-row">
+          ${badge}
+          <span class="party-rec-title">${tables.length}桌分桌方案</span>
+        </div>
+        <div class="party-rec-score">
+          综合评分 <strong>${totalScore}</strong>
+        </div>
+      </div>
+      <div class="party-rec-body">
+        ${reasonsHtml}
+        ${warningsHtml}
+        <div class="split-tables-container">
+          ${tablesHtml}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderPartyRecCard(item, rank) {
@@ -3745,9 +4185,23 @@ function renderPartyRecCard(item, rank) {
   `;
 }
 
-function renderPartyRecommendations(recommendations) {
+function renderPartyRecommendations(result) {
   if (!els.partyRecommendations) return;
 
+  if (result.type === "split" && result.plans && result.plans.length > 0) {
+    const tagFilter = state.partyTagFilter || "";
+    els.partyRecommendations.innerHTML = `
+      <h4>🎯 分桌方案推荐（${result.plans.length} 个方案）</h4>
+      <p class="party-hint">
+        总人数 ${partyState.playerCount} 人超过所有候选游戏的单桌上限，智能推荐以下分桌方案。
+        ${tagFilter ? `当前筛选标签：${renderTagChips([tagFilter])}` : ""}
+      </p>
+      ${result.plans.map((plan, idx) => renderSplitTableCard(plan, idx)).join("")}
+    `;
+    return;
+  }
+
+  const recommendations = result.recommendations || [];
   if (recommendations.length === 0) {
     const tagFilter = state.partyTagFilter || "";
     const emptyText = tagFilter
@@ -3757,8 +4211,16 @@ function renderPartyRecommendations(recommendations) {
     return;
   }
 
+  const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+  const maxMaxPlayers = Math.max(...candidateGames.map((g) => g.maxPlayers));
+  const totalPlayers = partyState.playerCount;
+  const hintText = totalPlayers <= maxMaxPlayers
+    ? `总人数 ${totalPlayers} 人，可单桌进行，以下为推荐排序。`
+    : `总人数 ${totalPlayers} 人，但未找到合适的分桌组合，以下为单桌推荐（可能需要调整人数或候选桌游）。`;
+
   els.partyRecommendations.innerHTML = `
     <h4>🎯 推荐桌游（${recommendations.length} 个候选）</h4>
+    <p class="party-hint">${hintText}</p>
     ${recommendations.map((item, idx) => renderPartyRecCard(item, idx)).join("")}
   `;
 }
@@ -3778,9 +4240,96 @@ function renderPartyPreparationSection(title, icon, items, className, tagFilter 
   `;
 }
 
-function renderPartyPreparation(recommendations) {
+function renderSplitTablePreparation(plans) {
   if (!els.partyPreparation) return;
 
+  const topPlan = plans[0];
+  if (!topPlan) {
+    els.partyPreparation.innerHTML = "";
+    if (els.partyTagFilterContainer) {
+      els.partyTagFilterContainer.classList.add("hidden");
+    }
+    return;
+  }
+
+  const tagFilter = state.partyTagFilter || "";
+
+  if (els.partyTagFilterContainer) {
+    els.partyTagFilterContainer.innerHTML = renderTagFilterBar(tagFilter);
+    els.partyTagFilterContainer.classList.remove("hidden");
+  }
+
+  const html = topPlan.tables
+    .map((table, idx) => {
+      const game = table.game;
+      const openClass = idx === 0 ? "open" : "";
+      const allForges = game.forgets || [];
+      const allDisputes = game.disputes || [];
+      const allSetup = game.setup || [];
+
+      const mustReviewRules = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW);
+      const stillForgetRules = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.STILL_FORGET);
+
+      const combinedForges = [...allForges, ...mustReviewRules, ...stillForgetRules];
+      const uniqueForges = [];
+      const seenForget = new Set();
+      for (const r of combinedForges) {
+        const t = ruleText(r);
+        if (!seenForget.has(t)) {
+          seenForget.add(t);
+          uniqueForges.push(r);
+        }
+      }
+
+      const playerNames = table.players.map((p) => escapeHtml(p.name || `玩家${p.index + 1}`)).join("、");
+
+      return `
+        <div class="party-prep-game-group ${openClass}" data-prep-game="${game.id}-${table.tableNumber}">
+          <div class="party-prep-game-header" data-prep-toggle="${game.id}-${table.tableNumber}">
+            <span class="party-prep-toggle">▶</span>
+            <span class="party-prep-game-title">
+              <span class="split-table-number">第${table.tableNumber}桌</span>
+              ${escapeHtml(game.name)}
+            </span>
+            <span class="pill">${table.players.length}人</span>
+            <span class="pill">${game.duration}分钟</span>
+          </div>
+          <div class="party-prep-game-body">
+            <div class="split-table-prep-players">
+              <span class="split-table-players-label">👥 本桌玩家：</span>
+              <span class="split-table-players-names">${playerNames}</span>
+            </div>
+            <div class="split-table-review-focus">
+              <h5>📝 本桌复习重点</h5>
+              ${renderPartyPreparationSection("开局准备", "📦", allSetup, "setup", tagFilter)}
+              ${renderPartyPreparationSection("容易忘的规则", "⚠️", uniqueForges, "forget", tagFilter)}
+              ${renderPartyPreparationSection("争议提醒", "⚖️", allDisputes, "dispute", tagFilter)}
+            </div>
+            <div style="margin-top:10px;">
+              <button type="button" class="party-jump-to-detail text-btn" data-game-id="${game.id}">📖 打开《${escapeHtml(game.name)}》完整详情页 →</button>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.partyPreparation.innerHTML = `
+    <h4>📋 分桌复习清单（首推方案 · 共 ${topPlan.tables.length} 桌）</h4>
+    <p class="party-hint">以下为推荐方案的每桌复习重点，可根据实际人员调整灵活变动。</p>
+    ${html}
+  `;
+}
+
+function renderPartyPreparation(result) {
+  if (!els.partyPreparation) return;
+
+  if (result.type === "split" && result.plans && result.plans.length > 0) {
+    renderSplitTablePreparation(result.plans);
+    return;
+  }
+
+  const recommendations = result.recommendations || [];
   const relevantGames = recommendations.slice(0, Math.min(3, recommendations.length)).map((r) => r.game);
 
   if (relevantGames.length === 0) {
@@ -3849,12 +4398,12 @@ function renderPartyPreparation(recommendations) {
 function renderPartyResult() {
   if (!partyState || !els.partyResultView) return;
 
-  const recommendations = generatePartyRecommendations();
+  const result = generatePartyRecommendations();
 
   els.partyResultTitle.textContent = partyState.name ? `${partyState.name} · 准备方案` : "聚会准备方案";
 
-  renderPartyRecommendations(recommendations);
-  renderPartyPreparation(recommendations);
+  renderPartyRecommendations(result);
+  renderPartyPreparation(result);
 }
 
 function generatePartyResult() {
@@ -4019,9 +4568,9 @@ els.partyResultView?.addEventListener("click", (e) => {
     state.partyTagFilter = tagFilterChip.dataset.tagFilter || "";
     saveState();
     if (partyState) {
-      const recommendations = generatePartyRecommendations();
-      renderPartyRecommendations(recommendations);
-      renderPartyPreparation(recommendations);
+      const result = generatePartyRecommendations();
+      renderPartyRecommendations(result);
+      renderPartyPreparation(result);
     }
     return;
   }
