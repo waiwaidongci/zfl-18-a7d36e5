@@ -3676,8 +3676,7 @@ function calculateGameScore(game, players) {
 }
 
 function needsSplitTable(candidateGames, totalPlayers) {
-  const maxMaxPlayers = Math.max(...candidateGames.map((g) => g.maxPlayers));
-  return totalPlayers > maxMaxPlayers;
+  return candidateGames.some((g) => totalPlayers > g.maxPlayers);
 }
 
 function getPlayerSubsets(players, tableCount) {
@@ -3833,9 +3832,10 @@ function generateTableAssignments(candidateGames, players, tableCount) {
       return;
     }
 
-    const availableGames = validGamesPerTable[tableIndex].filter((g) => !usedGameIds.has(g.id));
+    const validGames = validGamesPerTable[tableIndex];
+    const unusedGames = validGames.filter((g) => !usedGameIds.has(g.id));
 
-    for (const game of availableGames) {
+    for (const game of unusedGames) {
       usedGameIds.add(game.id);
       currentPlan.push({ tableIndex, game, playerCount: tableSizes[tableIndex] });
       generateCombinations(tableIndex + 1, usedGameIds, currentPlan);
@@ -3843,14 +3843,11 @@ function generateTableAssignments(candidateGames, players, tableCount) {
       usedGameIds.delete(game.id);
     }
 
-    if (usedGameIds.size < tableCount) {
-      for (const game of validGamesPerTable[tableIndex]) {
-        if (usedGameIds.has(game.id)) continue;
-        usedGameIds.add(game.id);
+    if (unusedGames.length === 0 || plans.length === 0) {
+      for (const game of validGames) {
         currentPlan.push({ tableIndex, game, playerCount: tableSizes[tableIndex] });
         generateCombinations(tableIndex + 1, usedGameIds, currentPlan);
         currentPlan.pop();
-        usedGameIds.delete(game.id);
       }
     }
   }
@@ -4193,7 +4190,7 @@ function renderPartyRecommendations(result) {
     els.partyRecommendations.innerHTML = `
       <h4>🎯 分桌方案推荐（${result.plans.length} 个方案）</h4>
       <p class="party-hint">
-        总人数 ${partyState.playerCount} 人超过所有候选游戏的单桌上限，智能推荐以下分桌方案。
+        总人数 ${partyState.playerCount} 人超过部分候选游戏的单桌上限，智能推荐以下分桌方案。
         ${tagFilter ? `当前筛选标签：${renderTagChips([tagFilter])}` : ""}
       </p>
       ${result.plans.map((plan, idx) => renderSplitTableCard(plan, idx)).join("")}
@@ -4212,9 +4209,9 @@ function renderPartyRecommendations(result) {
   }
 
   const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
-  const maxMaxPlayers = Math.max(...candidateGames.map((g) => g.maxPlayers));
   const totalPlayers = partyState.playerCount;
-  const hintText = totalPlayers <= maxMaxPlayers
+  const hasOverLimitCandidate = candidateGames.some((g) => totalPlayers > g.maxPlayers);
+  const hintText = !hasOverLimitCandidate
     ? `总人数 ${totalPlayers} 人，可单桌进行，以下为推荐排序。`
     : `总人数 ${totalPlayers} 人，但未找到合适的分桌组合，以下为单桌推荐（可能需要调整人数或候选桌游）。`;
 
