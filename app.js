@@ -1324,17 +1324,18 @@ function renderReviewSummary(game, expansionId = "") {
   const resumeBanner = renderResumeBanner(null);
 
   const actionBtns = [];
+  const scopeAttrs = `data-game-id="${game.id}" data-expansion-id="${expansionId}"`;
   if (mustReviewCount > 0) {
-    actionBtns.push(`<button type="button" class="review-start-btn" data-start-review="${REVIEW_SESSION_SOURCE.MUST_REVIEW}">🔔 复习下次必看 (${mustReviewCount})</button>`);
+    actionBtns.push(`<button type="button" class="review-start-btn" data-start-review="${REVIEW_SESSION_SOURCE.MUST_REVIEW}" ${scopeAttrs}>🔔 复习下次必看 (${mustReviewCount})</button>`);
   }
   if (stillForgetCount > 0) {
-    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.STILL_FORGET}">💭 复习还会忘 (${stillForgetCount})</button>`);
+    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.STILL_FORGET}" ${scopeAttrs}>💭 复习还会忘 (${stillForgetCount})</button>`);
   }
   if (unresolvedDisputes > 0) {
-    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.UNRESOLVED_DISPUTES}">⚖️ 复习未裁定 (${unresolvedDisputes})</button>`);
+    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.UNRESOLVED_DISPUTES}" ${scopeAttrs}>⚖️ 复习未裁定 (${unresolvedDisputes})</button>`);
   }
   if (pendingCount > 0) {
-    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.ALL_PENDING}">📖 全部待复习 (${pendingCount})</button>`);
+    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.ALL_PENDING}" ${scopeAttrs}>📖 全部待复习 (${pendingCount})</button>`);
   }
 
   const actionsHtml = actionBtns.length > 0
@@ -5096,14 +5097,18 @@ els.partyResultView?.addEventListener("click", (e) => {
 
 updatePartyStatusLabel("未启动");
 
-function collectRulesWithMeta(filterFn, sourceLabel) {
+function collectRulesWithMeta(filterFn, sourceLabel, scope) {
   const collected = [];
+  const scopeGameId = scope?.gameId || null;
+  const scopeExpansionId = scope?.expansionId !== undefined ? scope.expansionId : null;
   for (const game of state.games) {
+    if (scopeGameId && game.id !== scopeGameId) continue;
     const containers = [{ container: game, expansionId: "", expansionName: "" }];
     for (const exp of game.expansions || []) {
       containers.push({ container: exp, expansionId: exp.id, expansionName: exp.name });
     }
     for (const { container, expansionId, expansionName } of containers) {
+      if (scopeExpansionId !== null && (scopeExpansionId || "") !== expansionId) continue;
       const ruleKeys = ["forgets", "disputes", "setup", "scoring"];
       for (const ruleKey of ruleKeys) {
         const rules = container[ruleKey] || [];
@@ -5130,21 +5135,23 @@ function collectRulesWithMeta(filterFn, sourceLabel) {
   return collected;
 }
 
-function collectMustReviewRules() {
+function collectMustReviewRules(scope) {
   return collectRulesWithMeta(
     (rule) => ruleStatus(rule) === REVIEW_STATUS.MUST_REVIEW,
-    "下次必看"
+    "下次必看",
+    scope
   );
 }
 
-function collectStillForgetRules() {
+function collectStillForgetRules(scope) {
   return collectRulesWithMeta(
     (rule) => ruleStatus(rule) === REVIEW_STATUS.STILL_FORGET,
-    "还会忘"
+    "还会忘",
+    scope
   );
 }
 
-function collectUnresolvedDisputeRules() {
+function collectUnresolvedDisputeRules(scope) {
   return collectRulesWithMeta(
     (rule, ruleKey, game, container, expansionId) => {
       if (ruleKey !== "disputes") return false;
@@ -5154,7 +5161,8 @@ function collectUnresolvedDisputeRules() {
       const entry = rulings.find((r) => r.disputeText === text && (r.expansionId || "") === expId);
       return !entry || entry.rulings.length === 0;
     },
-    "未裁定争议"
+    "未裁定争议",
+    scope
   );
 }
 
@@ -5186,30 +5194,32 @@ function collectPartyRules() {
   );
 }
 
-function collectAllPendingRules() {
+function collectAllPendingRules(scope) {
   return collectRulesWithMeta(
     (rule) => {
       const s = ruleStatus(rule);
       return s === REVIEW_STATUS.UNMARKED || s === REVIEW_STATUS.STILL_FORGET || s === REVIEW_STATUS.MUST_REVIEW;
     },
-    "待复习"
+    "待复习",
+    scope
   );
 }
 
 function collectRulesBySource(source, extraData) {
+  const scope = extraData?.scope || null;
   switch (source) {
     case REVIEW_SESSION_SOURCE.MUST_REVIEW:
-      return collectMustReviewRules();
+      return collectMustReviewRules(scope);
     case REVIEW_SESSION_SOURCE.STILL_FORGET:
-      return collectStillForgetRules();
+      return collectStillForgetRules(scope);
     case REVIEW_SESSION_SOURCE.UNRESOLVED_DISPUTES:
-      return collectUnresolvedDisputeRules();
+      return collectUnresolvedDisputeRules(scope);
     case REVIEW_SESSION_SOURCE.CHECKLIST:
       return collectChecklistRules();
     case REVIEW_SESSION_SOURCE.PARTY:
       return collectPartyRules();
     case REVIEW_SESSION_SOURCE.ALL_PENDING:
-      return collectAllPendingRules();
+      return collectAllPendingRules(scope);
     default:
       return [];
   }
@@ -5559,7 +5569,14 @@ document.addEventListener("click", (e) => {
   const startBtn = e.target.closest("[data-start-review]");
   if (startBtn) {
     const source = startBtn.dataset.startReview;
-    if (source) startReviewSession(source);
+    if (!source) return;
+    const extraData = {};
+    const gameId = startBtn.dataset.gameId;
+    const expansionId = startBtn.dataset.expansionId;
+    if (gameId) {
+      extraData.scope = { gameId, expansionId: expansionId !== undefined ? expansionId : "" };
+    }
+    startReviewSession(source, extraData);
     return;
   }
   const resumeBtn = e.target.closest("[data-resume-session]");
