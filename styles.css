@@ -2712,3 +2712,117 @@ label {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 }
+
+.checklist-game-wrapper {
+  display: grid;
+  gap: 8px;
+}
+
+.checklist-expansions {
+  margin-left: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(116, 100, 155, 0.04);
+}
+
+.checklist-expansions-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--lavender);
+  margin-bottom: 8px;
+}
+
+.checklist-expansions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checklist-expansion-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.checklist-expansion-item:hover {
+  background: rgba(116, 100, 155, 0.1);
+}
+
+.checklist-expansion-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--lavender);
+  flex-shrink: 0;
+}
+
+.checklist-expansion-item span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.checklist-base-section {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(49, 95, 134, 0.03);
+}
+
+.checklist-base-header {
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.checklist-base-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.checklist-expansion-section {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid rgba(116, 100, 155, 0.3);
+  border-radius: 8px;
+  background: rgba(116, 100, 155, 0.05);
+}
+
+.checklist-expansion-section:last-child {
+  margin-bottom: 0;
+}
+
+.checklist-expansion-header {
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(116, 100, 155, 0.3);
+}
+
+.checklist-expansion-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--lavender);
+  font-weight: 800;
+}
+
+@media (max-width: 640px) {
+  .checklist-expansions {
+    margin-left: 4px;
+    padding: 8px 10px;
+  }
+
+  .checklist-base-section,
+  .checklist-expansion-section {
+    padding: 10px;
+  }
+}

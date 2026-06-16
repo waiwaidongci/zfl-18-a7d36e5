@@ -167,6 +167,7 @@ const defaultState = {
   selectedId: "",
   selectedExpansionId: "",
   selectedChecklistIds: [],
+  selectedChecklistExpansionIds: {},
   checklistPlayerFilter: "all",
   filterMustReview: false,
   filterViews: [],
@@ -186,10 +187,28 @@ const defaultState = {
       setup: normalizeRuleArray(["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"]),
       scoring: normalizeRuleArray(["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"]),
       loanRecords: [],
-      expansions: [],
+      expansions: [
+        {
+          id: crypto.randomUUID(),
+          name: "贸易与阴谋",
+          forgets: normalizeRuleArray(["阴谋卡使用后立即结算，不能留存到下一轮", "贸易路线必须连续，不能跳过已有商站"]),
+          disputes: normalizeRuleArray(["贸易卡能否在他人回合使用"]),
+          setup: normalizeRuleArray(["每位玩家额外拿取2张阴谋卡", "放置贸易板块到对应区域"]),
+          scoring: normalizeRuleArray(["贸易路线长度加分", "阴谋卡剩余扣分"])
+        },
+        {
+          id: crypto.randomUUID(),
+          name: "新大陆",
+          forgets: normalizeRuleArray(["航行必须消耗粮食，不够则损失船员", "新大陆商站需双倍建造成本"]),
+          disputes: normalizeRuleArray([]),
+          setup: normalizeRuleArray(["放置新大陆地图板块", "每位玩家获得1艘船标记"]),
+          scoring: normalizeRuleArray(["新大陆商站双倍分数", "航行成功次数奖励"])
+        }
+      ],
       disputeRulings: normalizeDisputeRulings([
         { disputeText: "事件顺序和玩家动作结算先后", expansionId: "", rulings: [] },
-        { disputeText: "科技板是否能替代所有同类随从", expansionId: "", rulings: [] }
+        { disputeText: "科技板是否能替代所有同类随从", expansionId: "", rulings: [] },
+        { disputeText: "贸易卡能否在他人回合使用", expansionId: "", rulings: [] }
       ])
     },
     {
@@ -396,6 +415,10 @@ function loadState() {
       schemaVersion: SCHEMA_VERSION,
       selectedExpansionId: migrated.selectedExpansionId || "",
       selectedChecklistIds: Array.isArray(migrated.selectedChecklistIds) ? migrated.selectedChecklistIds : [],
+      selectedChecklistExpansionIds:
+        typeof migrated.selectedChecklistExpansionIds === "object" && migrated.selectedChecklistExpansionIds !== null
+          ? migrated.selectedChecklistExpansionIds
+          : {},
       checklistPlayerFilter: migrated.checklistPlayerFilter || "all",
       filterMustReview: migrated.filterMustReview || false,
       filterViews: Array.isArray(migrated.filterViews) ? migrated.filterViews : [],
@@ -1055,6 +1078,20 @@ function getChecklistFilteredGames() {
 function syncChecklistSelection() {
   const validIds = new Set(state.games.map((game) => game.id));
   state.selectedChecklistIds = state.selectedChecklistIds.filter((id) => validIds.has(id));
+  const validExpansionIds = {};
+  for (const game of state.games) {
+    if (game.expansions && game.expansions.length > 0) {
+      validExpansionIds[game.id] = new Set(game.expansions.map((e) => e.id));
+    }
+  }
+  const cleanedExpansions = {};
+  for (const gameId of state.selectedChecklistIds) {
+    if (validExpansionIds[gameId]) {
+      const selected = state.selectedChecklistExpansionIds[gameId] || [];
+      cleanedExpansions[gameId] = selected.filter((id) => validExpansionIds[gameId].has(id));
+    }
+  }
+  state.selectedChecklistExpansionIds = cleanedExpansions;
 }
 
 function renderChecklistGames() {
@@ -1068,14 +1105,42 @@ function renderChecklistGames() {
       .map((game) => {
         const checked = state.selectedChecklistIds.includes(game.id) ? "checked" : "";
         const checkedClass = checked ? "checked" : "";
-        return `
-          <label class="checklist-game-card ${checkedClass}">
-            <input type="checkbox" data-checklist-id="${game.id}" ${checked} />
-            <div class="checklist-game-info">
-              <strong>${escapeHtml(game.name)}</strong>
-              <span>${game.minPlayers}-${game.maxPlayers}人 · ${game.duration}分钟</span>
+        const hasExpansions = game.expansions && game.expansions.length > 0;
+        const selectedExpansionIds = state.selectedChecklistExpansionIds[game.id] || [];
+
+        let expansionsHtml = "";
+        if (hasExpansions && checked) {
+          expansionsHtml = `
+            <div class="checklist-expansions" data-checklist-game-expansions="${game.id}">
+              <div class="checklist-expansions-label">包含扩展包：</div>
+              <div class="checklist-expansions-list">
+                ${game.expansions
+                  .map((exp) => {
+                    const expChecked = selectedExpansionIds.includes(exp.id) ? "checked" : "";
+                    return `
+                      <label class="checklist-expansion-item">
+                        <input type="checkbox" data-checklist-expansion-game="${game.id}" data-checklist-expansion-id="${exp.id}" ${expChecked} />
+                        <span>${escapeHtml(exp.name)}</span>
+                      </label>
+                    `;
+                  })
+                  .join("")}
+              </div>
             </div>
-          </label>
+          `;
+        }
+
+        return `
+          <div class="checklist-game-wrapper">
+            <label class="checklist-game-card ${checkedClass}">
+              <input type="checkbox" data-checklist-id="${game.id}" ${checked} />
+              <div class="checklist-game-info">
+                <strong>${escapeHtml(game.name)}</strong>
+                <span>${game.minPlayers}-${game.maxPlayers}人 · ${game.duration}分钟${hasExpansions ? ` · ${game.expansions.length}个扩展包` : ""}</span>
+              </div>
+            </label>
+            ${expansionsHtml}
+          </div>
         `;
       })
       .join("") || `<p class="checklist-empty">没有符合人数筛选的桌游。</p>`;
@@ -1091,17 +1156,57 @@ function renderChecklist() {
     return;
   }
 
+  function buildRuleGroups(source) {
+    const forgetsHtml = source.forgets.length
+      ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${source.forgets.map((f) => `<li>${escapeHtml(ruleText(f))}</li>`).join("")}</ul></div>`
+      : "";
+    const setupHtml = source.setup.length
+      ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${source.setup.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
+      : "";
+    const scoringHtml = source.scoring.length
+      ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${source.scoring.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
+      : "";
+    return forgetsHtml + setupHtml + scoringHtml;
+  }
+
   const sectionsHtml = selectedGames
     .map((game) => {
-      const forgetsHtml = game.forgets.length
-        ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${game.forgets.map((f) => `<li>${escapeHtml(ruleText(f))}</li>`).join("")}</ul></div>`
-        : "";
-      const setupHtml = game.setup.length
-        ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${game.setup.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
-        : "";
-      const scoringHtml = game.scoring.length
-        ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${game.scoring.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
-        : "";
+      const baseRuleHtml = buildRuleGroups(game);
+      const selectedExpansionIds = state.selectedChecklistExpansionIds[game.id] || [];
+      const selectedExpansions = (game.expansions || []).filter((e) => selectedExpansionIds.includes(e.id));
+
+      let expansionsHtml = "";
+      if (selectedExpansions.length > 0) {
+        expansionsHtml = selectedExpansions
+          .map((exp) => {
+            const expRuleHtml = buildRuleGroups(exp);
+            if (!expRuleHtml) return "";
+            return `
+              <div class="checklist-expansion-section">
+                <div class="checklist-expansion-header">
+                  <h5 class="checklist-expansion-title">🧩 ${escapeHtml(exp.name)}</h5>
+                </div>
+                ${expRuleHtml}
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      let baseSectionHtml = "";
+      if (baseRuleHtml) {
+        baseSectionHtml = `
+          <div class="checklist-base-section">
+            <div class="checklist-base-header">
+              <h5 class="checklist-base-title">🎮 基础游戏</h5>
+            </div>
+            ${baseRuleHtml}
+          </div>
+        `;
+      }
+
+      const totalContent = baseSectionHtml + expansionsHtml;
+      if (!totalContent) return "";
 
       return `
         <section class="checklist-game-section">
@@ -1110,9 +1215,7 @@ function renderChecklist() {
             <span class="pill">${game.minPlayers}-${game.maxPlayers}人</span>
             <span class="pill">${game.duration}分钟</span>
           </div>
-          ${forgetsHtml}
-          ${setupHtml}
-          ${scoringHtml}
+          ${totalContent}
         </section>
       `;
     })
@@ -2023,22 +2126,45 @@ els.checklistPlayerFilter.addEventListener("change", () => {
 });
 
 els.checklistGameList.addEventListener("change", (event) => {
-  const checkbox = event.target.closest("[data-checklist-id]");
-  if (!checkbox) return;
-  const gameId = checkbox.dataset.checklistId;
-  if (checkbox.checked) {
-    if (!state.selectedChecklistIds.includes(gameId)) {
-      state.selectedChecklistIds.push(gameId);
+  const gameCheckbox = event.target.closest("[data-checklist-id]");
+  if (gameCheckbox) {
+    const gameId = gameCheckbox.dataset.checklistId;
+    if (gameCheckbox.checked) {
+      if (!state.selectedChecklistIds.includes(gameId)) {
+        state.selectedChecklistIds.push(gameId);
+      }
+    } else {
+      state.selectedChecklistIds = state.selectedChecklistIds.filter((id) => id !== gameId);
+      delete state.selectedChecklistExpansionIds[gameId];
     }
-  } else {
-    state.selectedChecklistIds = state.selectedChecklistIds.filter((id) => id !== gameId);
+    renderChecklistGames();
+    saveState();
+    return;
   }
-  renderChecklistGames();
-  saveState();
+
+  const expansionCheckbox = event.target.closest("[data-checklist-expansion-game]");
+  if (expansionCheckbox) {
+    const gameId = expansionCheckbox.dataset.checklistExpansionGame;
+    const expansionId = expansionCheckbox.dataset.checklistExpansionId;
+    if (!state.selectedChecklistExpansionIds[gameId]) {
+      state.selectedChecklistExpansionIds[gameId] = [];
+    }
+    if (expansionCheckbox.checked) {
+      if (!state.selectedChecklistExpansionIds[gameId].includes(expansionId)) {
+        state.selectedChecklistExpansionIds[gameId].push(expansionId);
+      }
+    } else {
+      state.selectedChecklistExpansionIds[gameId] = state.selectedChecklistExpansionIds[gameId].filter(
+        (id) => id !== expansionId
+      );
+    }
+    saveState();
+  }
 });
 
 els.clearChecklistBtn.addEventListener("click", () => {
   state.selectedChecklistIds = [];
+  state.selectedChecklistExpansionIds = {};
   els.checklistView.classList.add("hidden");
   renderAll();
 });
