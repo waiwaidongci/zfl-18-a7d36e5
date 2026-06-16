@@ -3326,22 +3326,28 @@ function mergeExpansions(localGame, importGame) {
 function mergeDisputeRulings(localGame, importGame, mergedExpansions) {
   const localRulings = localGame.disputeRulings || [];
   const importRulings = importGame.disputeRulings || [];
-  const localMap = new Map();
-  for (const r of localRulings) {
-    const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
-    localMap.set(key, r);
+  const expNameToId = new Map();
+  for (const e of mergedExpansions || []) {
+    expNameToId.set(e.name.trim().toLowerCase(), e.id);
   }
+  const normalizeImportRuling = (entry) => {
+    let expId = entry.expansionId || "";
+    if (expId) {
+      const importExp = (importGame.expansions || []).find(e => e.id === expId);
+      if (importExp) {
+        const mergedExpId = expNameToId.get(importExp.name.trim().toLowerCase());
+        if (mergedExpId) expId = mergedExpId;
+      }
+    }
+    return { ...entry, expansionId: expId };
+  };
   const importMap = new Map();
-  for (const r of importRulings) {
+  for (const r of importRulings.map(normalizeImportRuling)) {
     const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
     importMap.set(key, r);
   }
   const mergedEntries = [];
   const seen = new Set();
-  const expNameToId = new Map();
-  for (const e of mergedExpansions || []) {
-    expNameToId.set(e.name.trim().toLowerCase(), e.id);
-  }
   for (const r of localRulings) {
     const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
     if (seen.has(key)) continue;
@@ -3364,19 +3370,11 @@ function mergeDisputeRulings(localGame, importGame, mergedExpansions) {
       mergedEntries.push({ ...r });
     }
   }
-  for (const r of importRulings) {
-    let expId = r.expansionId || "";
-    if (expId) {
-      const importExp = (importGame.expansions || []).find(e => e.id === expId);
-      if (importExp) {
-        const mergedExpId = expNameToId.get(importExp.name.trim().toLowerCase());
-        if (mergedExpId) expId = mergedExpId;
-      }
-    }
-    const key = `${expId}::${r.disputeText.toLowerCase()}`;
+  for (const r of importMap.values()) {
+    const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    mergedEntries.push({ ...r, expansionId: expId });
+    mergedEntries.push({ ...r });
   }
   return mergedEntries;
 }
