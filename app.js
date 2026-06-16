@@ -323,7 +323,22 @@ const els = {
   rulingSubmitBtn: document.querySelector("#rulingSubmitBtn"),
   coverGalleryGrid: document.querySelector("#coverGalleryGrid"),
   coverGalleryCount: document.querySelector("#coverGalleryCount"),
-  coverGalleryFileInput: document.querySelector("#coverGalleryFileInput")
+  coverGalleryFileInput: document.querySelector("#coverGalleryFileInput"),
+  partyStatusLabel: document.querySelector("#partyStatusLabel"),
+  partyIntro: document.querySelector("#partyIntro"),
+  startPartyBtn: document.querySelector("#startPartyBtn"),
+  partyConfigView: document.querySelector("#partyConfigView"),
+  partyNameInput: document.querySelector("#partyNameInput"),
+  partyPlayerCountInput: document.querySelector("#partyPlayerCountInput"),
+  partyCandidateList: document.querySelector("#partyCandidateList"),
+  partyPlayersContainer: document.querySelector("#partyPlayersContainer"),
+  partyGenerateBtn: document.querySelector("#partyGenerateBtn"),
+  partyResultView: document.querySelector("#partyResultView"),
+  partyResultTitle: document.querySelector("#partyResultTitle"),
+  partyRecommendations: document.querySelector("#partyRecommendations"),
+  partyPreparation: document.querySelector("#partyPreparation"),
+  partyBackToConfigBtn: document.querySelector("#partyBackToConfigBtn"),
+  partyResetBtn: document.querySelector("#partyResetBtn")
 };
 
 function loadState() {
@@ -2422,3 +2437,571 @@ els.detailView.addEventListener("click", (event) => {
     openEditDialog();
   }
 });
+
+const PARTY_COMPLEXITY = ["轻", "中", "重"];
+const PARTY_DEFAULT_PLAYER_NAMES = ["玩家一", "玩家二", "玩家三", "玩家四", "玩家五", "玩家六", "玩家七", "玩家八"];
+
+let partyState = null;
+
+function createEmptyPartyState() {
+  return {
+    step: 1,
+    name: "",
+    playerCount: 4,
+    candidateIds: [],
+    players: []
+  };
+}
+
+function createEmptyPlayer(index) {
+  return {
+    id: generateId(),
+    name: PARTY_DEFAULT_PLAYER_NAMES[index] || `玩家${index + 1}`,
+    dislikedComplexity: [],
+    familiarGameIds: []
+  };
+}
+
+function updatePartyStatusLabel(text) {
+  if (els.partyStatusLabel) {
+    els.partyStatusLabel.textContent = text;
+  }
+}
+
+function showPartyStep(step) {
+  if (!partyState) return;
+  partyState.step = step;
+
+  document.querySelectorAll(".party-step").forEach((el) => {
+    const s = Number(el.dataset.partyStep);
+    el.classList.toggle("active", s <= step);
+  });
+
+  document.querySelectorAll("[data-party-step-content]").forEach((el) => {
+    const s = Number(el.dataset.partyStepContent);
+    el.classList.toggle("hidden", s !== step);
+  });
+
+  if (step === 2) {
+    renderPartyCandidates();
+  } else if (step === 3) {
+    renderPartyPlayers();
+  }
+}
+
+function startPartyConfig() {
+  partyState = createEmptyPartyState();
+  partyState.players = Array.from({ length: partyState.playerCount }, (_, i) => createEmptyPlayer(i));
+
+  els.partyIntro.classList.add("hidden");
+  els.partyConfigView.classList.remove("hidden");
+  els.partyResultView.classList.add("hidden");
+  updatePartyStatusLabel("配置中");
+
+  showPartyStep(1);
+}
+
+function cancelPartyConfig() {
+  partyState = null;
+  els.partyIntro.classList.remove("hidden");
+  els.partyConfigView.classList.add("hidden");
+  els.partyResultView.classList.add("hidden");
+  updatePartyStatusLabel("未启动");
+}
+
+function renderPartyCandidates() {
+  if (!partyState || !els.partyCandidateList) return;
+  const selectedSet = new Set(partyState.candidateIds);
+
+  els.partyCandidateList.innerHTML =
+    state.games
+      .map((game) => {
+        const checked = selectedSet.has(game.id) ? "checked" : "";
+        const checkedClass = checked ? "checked" : "";
+        return `
+          <label class="party-candidate-card ${checkedClass}">
+            <input type="checkbox" data-party-candidate="${game.id}" ${checked} />
+            <div class="party-candidate-info">
+              <strong>${escapeHtml(game.name)}</strong>
+              <span>${game.minPlayers}-${game.maxPlayers}人 · ${game.duration}分钟 · ${escapeHtml(game.complexity)}</span>
+            </div>
+          </label>
+        `;
+      })
+      .join("") || `<p class="checklist-empty">暂无收藏的桌游，先添加一些桌游吧。</p>`;
+}
+
+function syncPartyPlayersCount() {
+  if (!partyState) return;
+  const count = partyState.playerCount;
+  while (partyState.players.length < count) {
+    partyState.players.push(createEmptyPlayer(partyState.players.length));
+  }
+  while (partyState.players.length > count) {
+    partyState.players.pop();
+  }
+}
+
+function renderPartyPlayers() {
+  if (!partyState || !els.partyPlayersContainer) return;
+  syncPartyPlayersCount();
+
+  const selectedCandidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+
+  els.partyPlayersContainer.innerHTML = partyState.players
+    .map((player, pIdx) => {
+      const dislikedSet = new Set(player.dislikedComplexity);
+      const familiarSet = new Set(player.familiarGameIds);
+
+      const complexityChips = PARTY_COMPLEXITY.map((c) => {
+        const active = dislikedSet.has(c) ? "active" : "";
+        return `<button type="button" class="party-complexity-chip ${active}" data-player-idx="${pIdx}" data-complexity="${c}">不玩${c}度</button>`;
+      }).join("");
+
+      const familiarGames =
+        selectedCandidateGames.length > 0
+          ? selectedCandidateGames
+              .map((game) => {
+                const checked = familiarSet.has(game.id) ? "checked" : "";
+                const checkedClass = checked ? "checked" : "";
+                return `
+                  <label class="party-familiar-game ${checkedClass}">
+                    <input type="checkbox" data-player-idx="${pIdx}" data-familiar-game="${game.id}" ${checked} />
+                    <span>${escapeHtml(game.name)}</span>
+                  </label>
+                `;
+              })
+              .join("")
+          : `<span class="party-prep-empty">请先在上一步选择候选桌游</span>`;
+
+      return `
+        <div class="party-player-card">
+          <div class="party-player-header">
+            <span class="party-player-icon">${pIdx + 1}</span>
+            <input type="text" class="party-player-name-input" data-player-idx="${pIdx}" value="${escapeHtml(player.name)}" placeholder="玩家姓名" />
+          </div>
+          <div class="party-player-section">
+            <div class="party-player-section-label">🙅 不想玩的复杂度（可多选）</div>
+            <div class="party-complexity-chips">${complexityChips}</div>
+          </div>
+          <div class="party-player-section">
+            <div class="party-player-section-label">✅ 已熟悉的游戏（无需讲解规则）</div>
+            <div class="party-familiar-games">${familiarGames}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function calculateGameScore(game, players) {
+  const reasons = [];
+  const warnings = [];
+  let score = 0;
+
+  if (!partyState) return { score: 0, reasons, warnings };
+
+  const totalPlayers = partyState.playerCount;
+  if (totalPlayers >= game.minPlayers && totalPlayers <= game.maxPlayers) {
+    score += 30;
+    reasons.push(`人数匹配：支持 ${game.minPlayers}-${game.maxPlayers} 人，本次 ${totalPlayers} 人刚好合适`);
+  } else if (totalPlayers < game.minPlayers) {
+    warnings.push(`人数不足：游戏至少需要 ${game.minPlayers} 人，当前只有 ${totalPlayers} 人`);
+    score -= 30;
+  } else {
+    warnings.push(`人数超限：游戏最多支持 ${game.maxPlayers} 人，当前有 ${totalPlayers} 人，可能需要分桌或扩展规则`);
+    score -= 20;
+  }
+
+  const dislikedByCount = players.filter((p) => p.dislikedComplexity.includes(game.complexity)).length;
+  if (dislikedByCount === 0) {
+    score += 20;
+    reasons.push(`复杂度合适：没有玩家不喜欢 ${game.complexity} 度游戏`);
+  } else {
+    const dislikedNames = players.filter((p) => p.dislikedComplexity.includes(game.complexity)).map((p) => p.name).join("、");
+    warnings.push(`复杂度有争议：${dislikedNames} 不喜欢 ${game.complexity} 度游戏`);
+    score -= dislikedByCount * 10;
+  }
+
+  const familiarCount = players.filter((p) => p.familiarGameIds.includes(game.id)).length;
+  if (familiarCount === players.length) {
+    score += 15;
+    reasons.push(`全员熟悉：所有人都玩过，开局即可开玩，无需讲解`);
+  } else if (familiarCount > 0) {
+    score += familiarCount * 3;
+    const familiarNames = players.filter((p) => p.familiarGameIds.includes(game.id)).map((p) => p.name).join("、");
+    reasons.push(`${familiarCount}/${players.length} 人熟悉：${familiarNames} 已掌握，可以带着其他人玩`);
+  } else {
+    warnings.push(`全员陌生：没有人玩过这个游戏，需要完整讲解规则，预留约 15-20 分钟教学时间`);
+  }
+
+  const totalRules = getAllRulesIncludingExpansions(game).length;
+  if (totalRules === 0) {
+    score += 5;
+    reasons.push(`规则准备：暂无记录的遗忘点，大家都记得很牢`);
+  } else if (totalRules <= 3) {
+    score += 3;
+    reasons.push(`规则准备简单：仅 ${totalRules} 条规则需要复习`);
+  } else {
+    score -= Math.min(10, totalRules - 3);
+    warnings.push(`规则较多：共 ${totalRules} 条规则/争议需要提前复习`);
+  }
+
+  const mustReviewCount = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW).length;
+  if (mustReviewCount > 0) {
+    warnings.push(`有 ${mustReviewCount} 条规则标记为「下次必看」，务必提前过一遍`);
+    score -= mustReviewCount * 2;
+  }
+
+  const staleDays = daysSince(game.lastPlayed);
+  if (staleDays <= 30) {
+    score += 8;
+    reasons.push(`最近玩过：${staleDays} 天前刚玩过，大家印象还比较深`);
+  } else if (staleDays <= 90) {
+    score += 3;
+    reasons.push(`不算太久：${staleDays} 天前玩过，稍微复习应该能回忆起来`);
+  } else {
+    warnings.push(`间隔较久：${staleDays} 天没玩了，很多细节可能遗忘，建议重点复习`);
+  }
+
+  if (hasUnresolvedDisputes(game)) {
+    warnings.push(`存在未裁定争议，建议开局前先统一规则口径`);
+    score -= 5;
+  }
+
+  return { score, reasons, warnings };
+}
+
+function generatePartyRecommendations() {
+  if (!partyState) return [];
+
+  const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+  const scored = candidateGames.map((game) => {
+    const { score, reasons, warnings } = calculateGameScore(game, partyState.players);
+    return { game, score, reasons, warnings };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
+function renderPartyRecCard(item, rank) {
+  const { game, score, reasons, warnings } = item;
+  const isTop = rank === 0;
+  const cardClass = isTop ? "recommended" : "alternative";
+  const badge = isTop
+    ? `<span class="party-rec-badge top">⭐ 首推</span>`
+    : `<span class="party-rec-badge alt">备选</span>`;
+
+  const reasonsHtml =
+    reasons.length > 0
+      ? `<div class="party-reasons"><h5>✅ 推荐理由</h5><ul>${reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div>`
+      : "";
+
+  const warningsHtml =
+    warnings.length > 0
+      ? `<div class="party-warnings"><h5>⚠️ 注意事项</h5><ul>${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>`
+      : "";
+
+  return `
+    <div class="party-rec-card ${cardClass}" data-party-rec-game="${game.id}">
+      <div class="party-rec-header">
+        <div class="party-rec-title-row">
+          ${badge}
+          <span class="party-rec-title">${escapeHtml(game.name)}</span>
+        </div>
+        <div class="party-rec-score">
+          综合评分 <strong>${score}</strong>
+        </div>
+      </div>
+      <div class="party-rec-body">
+        <div class="party-rec-meta">
+          <span class="pill">${game.minPlayers}-${game.maxPlayers}人</span>
+          <span class="pill">${game.duration}分钟</span>
+          <span class="pill heavy">${escapeHtml(game.complexity)}</span>
+          <span class="pill">${daysSince(game.lastPlayed)}天未玩</span>
+        </div>
+        ${reasonsHtml}
+        ${warningsHtml}
+        <div style="margin-top:8px;">
+          <button type="button" class="party-jump-to-detail text-btn" data-game-id="${game.id}">📖 查看详情 & 规则 →</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPartyRecommendations(recommendations) {
+  if (!els.partyRecommendations) return;
+
+  if (recommendations.length === 0) {
+    els.partyRecommendations.innerHTML = `<p class="checklist-empty">没有候选游戏可推荐，请回到上一步选择至少一个桌游。</p>`;
+    return;
+  }
+
+  els.partyRecommendations.innerHTML = `
+    <h4>🎯 推荐桌游（${recommendations.length} 个候选）</h4>
+    ${recommendations.map((item, idx) => renderPartyRecCard(item, idx)).join("")}
+  `;
+}
+
+function renderPartyPreparationSection(title, icon, items, className) {
+  if (!items || items.length === 0) {
+    return `<div class="party-prep-section"><div class="party-prep-section-label ${className}">${icon} ${title}</div><span class="party-prep-empty">暂无记录</span></div>`;
+  }
+  return `
+    <div class="party-prep-section">
+      <div class="party-prep-section-label ${className}">${icon} ${title}（${items.length} 条）</div>
+      <ul>${items.map((t) => `<li>${escapeHtml(ruleText(t))}</li>`).join("")}</ul>
+    </div>
+  `;
+}
+
+function renderPartyPreparation(recommendations) {
+  if (!els.partyPreparation) return;
+
+  const relevantGames = recommendations.slice(0, Math.min(3, recommendations.length)).map((r) => r.game);
+
+  if (relevantGames.length === 0) {
+    els.partyPreparation.innerHTML = "";
+    return;
+  }
+
+  const html = relevantGames
+    .map((game, idx) => {
+      const openClass = idx === 0 ? "open" : "";
+      const allForges = game.forgets || [];
+      const allDisputes = game.disputes || [];
+      const allSetup = game.setup || [];
+
+      const mustReviewRules = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW);
+      const stillForgetRules = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.STILL_FORGET);
+
+      const combinedForges = [...allForges, ...mustReviewRules, ...stillForgetRules];
+      const uniqueForges = [];
+      const seenForget = new Set();
+      for (const r of combinedForges) {
+        const t = ruleText(r);
+        if (!seenForget.has(t)) {
+          seenForget.add(t);
+          uniqueForges.push(r);
+        }
+      }
+
+      return `
+        <div class="party-prep-game-group ${openClass}" data-prep-game="${game.id}">
+          <div class="party-prep-game-header" data-prep-toggle="${game.id}">
+            <span class="party-prep-toggle">▶</span>
+            <span class="party-prep-game-title">${escapeHtml(game.name)}</span>
+            <span class="pill">${game.minPlayers}-${game.maxPlayers}人</span>
+            <span class="pill">${game.duration}分钟</span>
+          </div>
+          <div class="party-prep-game-body">
+            ${renderPartyPreparationSection("开局准备", "📦", allSetup, "setup")}
+            ${renderPartyPreparationSection("容易忘的规则", "⚠️", uniqueForges, "forget")}
+            ${renderPartyPreparationSection("争议提醒", "⚖️", allDisputes, "dispute")}
+            <div style="margin-top:10px;">
+              <button type="button" class="party-jump-to-detail text-btn" data-game-id="${game.id}">📖 打开完整详情页 →</button>
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  els.partyPreparation.innerHTML = `
+    <h4>📋 开局准备与复习清单（前 ${relevantGames.length} 个推荐游戏）</h4>
+    ${html}
+  `;
+}
+
+function renderPartyResult() {
+  if (!partyState || !els.partyResultView) return;
+
+  const recommendations = generatePartyRecommendations();
+
+  els.partyResultTitle.textContent = partyState.name ? `${partyState.name} · 准备方案` : "聚会准备方案";
+
+  renderPartyRecommendations(recommendations);
+  renderPartyPreparation(recommendations);
+}
+
+function generatePartyResult() {
+  if (!partyState) return;
+
+  if (partyState.candidateIds.length === 0) {
+    showBackupMessage("请先选择至少一个候选桌游。", "error");
+    showPartyStep(2);
+    return;
+  }
+
+  els.partyConfigView.classList.add("hidden");
+  els.partyResultView.classList.remove("hidden");
+  updatePartyStatusLabel("方案已生成");
+  renderPartyResult();
+  els.partyResultView.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+els.startPartyBtn?.addEventListener("click", startPartyConfig);
+
+els.partyConfigView?.addEventListener("click", (e) => {
+  const nextBtn = e.target.closest(".party-next-btn");
+  const prevBtn = e.target.closest(".party-prev-btn");
+  const cancelBtn = e.target.closest(".party-cancel-btn");
+  const candidateCard = e.target.closest(".party-candidate-card");
+  const complexityChip = e.target.closest(".party-complexity-chip");
+  const familiarGame = e.target.closest(".party-familiar-game");
+  const jumpBtn = e.target.closest(".party-jump-to-detail");
+
+  if (nextBtn && partyState) {
+    const nextStep = Number(nextBtn.dataset.nextStep);
+    if (nextStep === 2) {
+      partyState.name = els.partyNameInput.value.trim();
+      partyState.playerCount = Number(els.partyPlayerCountInput.value);
+      syncPartyPlayersCount();
+    }
+    if (nextStep === 3 && partyState.candidateIds.length === 0) {
+      showBackupMessage("请先选择至少一个候选桌游。", "error");
+      return;
+    }
+    showPartyStep(nextStep);
+    return;
+  }
+
+  if (prevBtn && partyState) {
+    const prevStep = Number(prevBtn.dataset.prevStep);
+    showPartyStep(prevStep);
+    return;
+  }
+
+  if (cancelBtn) {
+    cancelPartyConfig();
+    return;
+  }
+
+  if (candidateCard && partyState) {
+    const checkbox = candidateCard.querySelector('input[type="checkbox"]');
+    const gameId = checkbox?.dataset.partyCandidate;
+    if (!gameId) return;
+    if (checkbox.checked) {
+      if (!partyState.candidateIds.includes(gameId)) {
+        partyState.candidateIds.push(gameId);
+      }
+      candidateCard.classList.add("checked");
+    } else {
+      partyState.candidateIds = partyState.candidateIds.filter((id) => id !== gameId);
+      candidateCard.classList.remove("checked");
+    }
+    return;
+  }
+
+  if (complexityChip && partyState) {
+    const pIdx = Number(complexityChip.dataset.playerIdx);
+    const c = complexityChip.dataset.complexity;
+    const player = partyState.players[pIdx];
+    if (!player) return;
+    const set = new Set(player.dislikedComplexity);
+    if (set.has(c)) {
+      set.delete(c);
+      complexityChip.classList.remove("active");
+    } else {
+      set.add(c);
+      complexityChip.classList.add("active");
+    }
+    player.dislikedComplexity = [...set];
+    return;
+  }
+
+  if (familiarGame && partyState) {
+    const checkbox = familiarGame.querySelector('input[type="checkbox"]');
+    const pIdx = Number(familiarGame.querySelector("[data-player-idx]")?.dataset.playerIdx || checkbox?.dataset.playerIdx);
+    const gameId = checkbox?.dataset.familiarGame;
+    if (!gameId || !Number.isInteger(pIdx)) return;
+    const player = partyState.players[pIdx];
+    if (!player) return;
+    if (checkbox.checked) {
+      if (!player.familiarGameIds.includes(gameId)) {
+        player.familiarGameIds.push(gameId);
+      }
+      familiarGame.classList.add("checked");
+    } else {
+      player.familiarGameIds = player.familiarGameIds.filter((id) => id !== gameId);
+      familiarGame.classList.remove("checked");
+    }
+    return;
+  }
+
+  if (jumpBtn) {
+    const gameId = jumpBtn.dataset.gameId;
+    if (gameId) {
+      state.selectedId = gameId;
+      state.selectedExpansionId = "";
+      renderAll();
+      document.querySelector(".detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    return;
+  }
+});
+
+els.partyConfigView?.addEventListener("change", (e) => {
+  const nameInput = e.target.closest(".party-player-name-input");
+  if (nameInput && partyState) {
+    const pIdx = Number(nameInput.dataset.playerIdx);
+    if (Number.isInteger(pIdx) && partyState.players[pIdx]) {
+      partyState.players[pIdx].name = nameInput.value.trim();
+    }
+  }
+});
+
+els.partyPlayerCountInput?.addEventListener("change", () => {
+  if (partyState) {
+    partyState.playerCount = Number(els.partyPlayerCountInput.value);
+  }
+});
+
+els.partyGenerateBtn?.addEventListener("click", generatePartyResult);
+
+els.partyBackToConfigBtn?.addEventListener("click", () => {
+  if (!partyState) return;
+  els.partyResultView.classList.add("hidden");
+  els.partyConfigView.classList.remove("hidden");
+  updatePartyStatusLabel("配置中");
+  showPartyStep(partyState.step || 1);
+});
+
+els.partyResetBtn?.addEventListener("click", () => {
+  showConfirm(
+    "重新开始",
+    "确定要放弃当前配置并重新开始吗？",
+    () => {
+      cancelPartyConfig();
+    }
+  );
+});
+
+els.partyResultView?.addEventListener("click", (e) => {
+  const toggleHeader = e.target.closest("[data-prep-toggle]");
+  const jumpBtn = e.target.closest(".party-jump-to-detail");
+
+  if (toggleHeader) {
+    const gameId = toggleHeader.dataset.prepToggle;
+    const group = document.querySelector(`.party-prep-game-group[data-prep-game="${gameId}"]`);
+    if (group) {
+      group.classList.toggle("open");
+    }
+    return;
+  }
+
+  if (jumpBtn) {
+    const gameId = jumpBtn.dataset.gameId;
+    if (gameId) {
+      state.selectedId = gameId;
+      state.selectedExpansionId = "";
+      renderAll();
+      document.querySelector(".detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    return;
+  }
+});
+
+updatePartyStatusLabel("未启动");

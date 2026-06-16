@@ -118,6 +118,94 @@
         <div id="checklistView" class="checklist-view hidden"></div>
       </section>
 
+      <section class="party-panel panel">
+        <div class="panel-head">
+          <h2>🎊 多人聚会准备模式</h2>
+          <span id="partyStatusLabel">未启动</span>
+        </div>
+        <div id="partyIntro" class="party-intro">
+          <p>为本次聚会创建临时配置：选择参与人数、候选桌游、每位玩家不喜欢的复杂度和已熟悉的游戏，本地智能计算推荐桌游和复习重点。</p>
+          <button id="startPartyBtn" type="button" class="primary">开始配置聚会</button>
+        </div>
+
+        <div id="partyConfigView" class="party-config-view hidden">
+          <div class="party-step-indicator">
+            <div class="party-step active" data-party-step="1">
+              <span class="party-step-num">1</span>
+              <span>基本信息</span>
+            </div>
+            <div class="party-step" data-party-step="2">
+              <span class="party-step-num">2</span>
+              <span>候选桌游</span>
+            </div>
+            <div class="party-step" data-party-step="3">
+              <span class="party-step-num">3</span>
+              <span>玩家偏好</span>
+            </div>
+          </div>
+
+          <div class="party-step-content" data-party-step-content="1">
+            <h3>聚会基本信息</h3>
+            <div class="party-form-row">
+              <label>
+                聚会名称
+                <input id="partyNameInput" type="text" placeholder="例：周末桌游夜" />
+              </label>
+              <label>
+                参与人数
+                <select id="partyPlayerCountInput">
+                  <option value="2">2人</option>
+                  <option value="3">3人</option>
+                  <option value="4" selected>4人</option>
+                  <option value="5">5人</option>
+                  <option value="6">6人</option>
+                  <option value="7">7人</option>
+                  <option value="8">8人+</option>
+                </select>
+              </label>
+            </div>
+            <div class="party-nav">
+              <button type="button" class="party-cancel-btn">取消</button>
+              <button type="button" class="party-next-btn primary" data-next-step="2">下一步：候选桌游</button>
+            </div>
+          </div>
+
+          <div class="party-step-content hidden" data-party-step-content="2">
+            <h3>选择候选桌游</h3>
+            <p class="party-hint">从收藏中勾选可能要玩的桌游（至少选 1 个，建议选 3-6 个）</p>
+            <div id="partyCandidateList" class="party-candidate-list"></div>
+            <div class="party-nav">
+              <button type="button" class="party-prev-btn" data-prev-step="1">上一步</button>
+              <button type="button" class="party-cancel-btn">取消</button>
+              <button type="button" class="party-next-btn primary" data-next-step="3">下一步：玩家偏好</button>
+            </div>
+          </div>
+
+          <div class="party-step-content hidden" data-party-step-content="3">
+            <h3>玩家偏好配置</h3>
+            <p class="party-hint">为每位玩家设置：不喜欢的复杂度、已熟悉的游戏</p>
+            <div id="partyPlayersContainer" class="party-players-container"></div>
+            <div class="party-nav">
+              <button type="button" class="party-prev-btn" data-prev-step="2">上一步</button>
+              <button type="button" class="party-cancel-btn">取消</button>
+              <button id="partyGenerateBtn" type="button" class="primary">生成推荐与准备清单</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="partyResultView" class="party-result-view hidden">
+          <div class="party-result-header">
+            <h3 id="partyResultTitle">聚会准备方案</h3>
+            <div class="party-result-actions">
+              <button id="partyBackToConfigBtn" type="button">修改配置</button>
+              <button id="partyResetBtn" type="button" class="danger">重新开始</button>
+            </div>
+          </div>
+          <div id="partyRecommendations" class="party-recommendations"></div>
+          <div id="partyPreparation" class="party-preparation"></div>
+        </div>
+      </section>
+
       <div id="confirmDialog" class="dialog-overlay hidden">
         <div class="dialog">
           <h3 id="confirmTitle">确认操作</h3>
