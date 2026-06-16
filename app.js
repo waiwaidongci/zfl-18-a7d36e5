@@ -1471,9 +1471,15 @@ function showBatchCoverStep(step) {
   });
 }
 
+function setBatchCoverActionsDisabled(disabled) {
+  els.batchCoverConfirmBtn.disabled = disabled;
+  els.batchCoverBackBtn.disabled = disabled;
+}
+
 function openBatchCoverDialog() {
   batchCoverState = { items: [], processing: false };
   els.batchCoverFileInput.value = "";
+  setBatchCoverActionsDisabled(false);
   showBatchCoverStep(1);
   els.batchCoverDialog.classList.remove("hidden");
 }
@@ -1687,8 +1693,7 @@ async function confirmBatchCovers() {
   }
 
   batchCoverState.processing = true;
-  els.batchCoverConfirmBtn.disabled = true;
-  els.batchCoverBackBtn.disabled = true;
+  setBatchCoverActionsDisabled(true);
 
   let updatedCount = 0;
   let totalSaved = 0;
@@ -1717,6 +1722,7 @@ async function confirmBatchCovers() {
 function resetBatchCover() {
   batchCoverState = { items: [], processing: false };
   els.batchCoverFileInput.value = "";
+  setBatchCoverActionsDisabled(false);
   showBatchCoverStep(1);
 }
 
