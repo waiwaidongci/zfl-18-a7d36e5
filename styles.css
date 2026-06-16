@@ -170,7 +170,7 @@ label,
 
 .controls {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 150px 150px 150px auto;
+  grid-template-columns: minmax(220px, 1fr) 150px 150px 130px 150px auto;
   gap: 10px;
   align-items: end;
   padding: 12px;
@@ -3217,4 +3217,131 @@ label {
   .batch-cover-actions button {
     width: 100%;
   }
+}
+
+.rule-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.rule-tag-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.rule-tag-chip.tag-易错结算 {
+  --tag-color: var(--red);
+  color: var(--red);
+  background: rgba(179, 72, 72, 0.12);
+  border-color: rgba(179, 72, 72, 0.3);
+}
+
+.rule-tag-chip.tag-开局流程 {
+  --tag-color: var(--blue);
+  color: var(--blue);
+  background: rgba(49, 95, 134, 0.12);
+  border-color: rgba(49, 95, 134, 0.3);
+}
+
+.rule-tag-chip.tag-新人教学 {
+  --tag-color: var(--green);
+  color: var(--green);
+  background: rgba(57, 116, 91, 0.12);
+  border-color: rgba(57, 116, 91, 0.3);
+}
+
+.rule-tag-chip.tag-扩展专属 {
+  --tag-color: var(--lavender);
+  color: var(--lavender);
+  background: rgba(116, 100, 155, 0.12);
+  border-color: rgba(116, 100, 155, 0.3);
+}
+
+.rule-tag-chip.tag-计分终局 {
+  --tag-color: var(--yellow);
+  color: var(--yellow);
+  background: rgba(213, 162, 61, 0.15);
+  border-color: rgba(213, 162, 61, 0.3);
+}
+
+.tag-filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  align-items: center;
+}
+
+.tag-filter-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tag-filter-chip:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.tag-filter-chip.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.tag-filter-chip .rule-tag-chip {
+  font-size: 11px;
+}
+
+.tag-selector {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tag-selector-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tag-selector-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--blue);
+  flex-shrink: 0;
+}
+
+.edit-rule-content {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.party-tag-filter-container {
+  margin-bottom: 14px;
+}
+
+.party-tag-filter-container .tag-filter-bar {
+  margin-bottom: 0;
 }

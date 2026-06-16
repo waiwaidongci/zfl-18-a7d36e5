@@ -1,5 +1,5 @@
 const storageKey = "zfl18-boardgame-rule-cards";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const today = new Date();
 
 const REVIEW_STATUS = {
@@ -20,17 +20,32 @@ function generateId() {
   return "id-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
 }
 
-function createRuleCard(text, status = REVIEW_STATUS.UNMARKED, createdAt = null) {
+const RULE_TAGS = ["易错结算", "开局流程", "新人教学", "扩展专属", "计分终局"];
+
+const TAG_COLORS = {
+  "易错结算": "var(--red)",
+  "开局流程": "var(--blue)",
+  "新人教学": "var(--green)",
+  "扩展专属": "var(--lavender)",
+  "计分终局": "var(--yellow)"
+};
+
+function createRuleCard(text, status = REVIEW_STATUS.UNMARKED, createdAt = null, tags = []) {
   return {
     id: generateId(),
     text: String(text || ""),
     status: status ?? REVIEW_STATUS.UNMARKED,
-    createdAt: createdAt || new Date().toISOString()
+    createdAt: createdAt || new Date().toISOString(),
+    tags: Array.isArray(tags) ? tags.filter(t => RULE_TAGS.includes(t)) : []
   };
 }
 
 function isRuleCardV1(rule) {
   return rule && typeof rule === "object" && "id" in rule && "createdAt" in rule;
+}
+
+function isRuleCardV2(rule) {
+  return isRuleCardV1(rule) && "tags" in rule;
 }
 
 function normalizeRule(rule) {
@@ -42,7 +57,8 @@ function normalizeRule(rule) {
       id: rule.id || generateId(),
       text: String(rule.text || ""),
       status: rule.status ?? REVIEW_STATUS.UNMARKED,
-      createdAt: rule.createdAt || new Date().toISOString()
+      createdAt: rule.createdAt || new Date().toISOString(),
+      tags: Array.isArray(rule.tags) ? rule.tags.filter(t => RULE_TAGS.includes(t)) : []
     };
   }
   return createRuleCard(rule?.text ?? "", rule?.status ?? REVIEW_STATUS.UNMARKED);
@@ -104,7 +120,8 @@ function migrateRuleArrayV0ToV1(rules, defaultDate = null) {
         id: rule.id || generateId(),
         text: String(rule.text || ""),
         status: rule.status ?? REVIEW_STATUS.UNMARKED,
-        createdAt: rule.createdAt || baseDate
+        createdAt: rule.createdAt || baseDate,
+        tags: Array.isArray(rule.tags) ? rule.tags.filter(t => RULE_TAGS.includes(t)) : []
       };
     }
     const text = typeof rule === "string" ? rule : (rule?.text || "");
@@ -147,6 +164,46 @@ function migrateV0ToV1(parsed) {
   return result;
 }
 
+function migrateV1ToV2(parsed) {
+  const result = { ...parsed };
+  if (Array.isArray(result.games)) {
+    result.games = result.games.map((game) => {
+      if (!game || typeof game !== "object") return game;
+      const addTags = (rules) => {
+        if (!Array.isArray(rules)) return rules;
+        return rules.map((rule) => {
+          if (rule && typeof rule === "object" && !Array.isArray(rule.tags)) {
+            return { ...rule, tags: [] };
+          }
+          return rule;
+        });
+      };
+      const migrated = {
+        ...game,
+        forgets: addTags(game.forgets),
+        disputes: addTags(game.disputes),
+        setup: addTags(game.setup),
+        scoring: addTags(game.scoring)
+      };
+      if (Array.isArray(migrated.expansions)) {
+        migrated.expansions = migrated.expansions.map((exp) => {
+          if (!exp || typeof exp !== "object") return exp;
+          return {
+            ...exp,
+            forgets: addTags(exp.forgets),
+            disputes: addTags(exp.disputes),
+            setup: addTags(exp.setup),
+            scoring: addTags(exp.scoring)
+          };
+        });
+      }
+      return migrated;
+    });
+  }
+  result.schemaVersion = SCHEMA_VERSION;
+  return result;
+}
+
 function runMigrations(parsed) {
   if (!parsed || typeof parsed !== "object") {
     return { schemaVersion: SCHEMA_VERSION, games: [] };
@@ -158,6 +215,9 @@ function runMigrations(parsed) {
   let migrated = parsed;
   if (currentVersion < 1) {
     migrated = migrateV0ToV1(migrated);
+  }
+  if (currentVersion < 2) {
+    migrated = migrateV1ToV2(migrated);
   }
   return migrated;
 }
@@ -172,6 +232,10 @@ const defaultState = {
   filterMustReview: false,
   filterViews: [],
   activeFilterViewId: "",
+  tagFilter: "",
+  listTagFilter: "",
+  checklistTagFilter: "",
+  partyTagFilter: "",
   games: [
     {
       id: crypto.randomUUID(),
@@ -289,6 +353,7 @@ const els = {
   confirmOk: document.querySelector("#confirmOk"),
   confirmCancel: document.querySelector("#confirmCancel"),
   checklistPlayerFilter: document.querySelector("#checklistPlayerFilter"),
+  checklistTagFilter: document.querySelector("#checklistTagFilter"),
   checklistGameList: document.querySelector("#checklistGameList"),
   checklistView: document.querySelector("#checklistView"),
   checklistSelectedCount: document.querySelector("#checklistSelectedCount"),
@@ -357,6 +422,7 @@ const els = {
   partyResultView: document.querySelector("#partyResultView"),
   partyResultTitle: document.querySelector("#partyResultTitle"),
   partyRecommendations: document.querySelector("#partyRecommendations"),
+  partyTagFilterContainer: document.querySelector("#partyTagFilterContainer"),
   partyPreparation: document.querySelector("#partyPreparation"),
   partyBackToConfigBtn: document.querySelector("#partyBackToConfigBtn"),
   partyResetBtn: document.querySelector("#partyResetBtn"),
@@ -380,8 +446,36 @@ const els = {
   batchCoverBackBtn: document.querySelector("#batchCoverBackBtn"),
   batchCoverConfirmBtn: document.querySelector("#batchCoverConfirmBtn"),
   batchCoverCloseBtn: document.querySelector("#batchCoverCloseBtn"),
-  batchCoverResultText: document.querySelector("#batchCoverResultText")
+  batchCoverResultText: document.querySelector("#batchCoverResultText"),
+  listTagFilter: document.querySelector("#listTagFilter")
 };
+
+function ruleTags(rule) {
+  if (!rule || typeof rule !== "object") return [];
+  return Array.isArray(rule.tags) ? rule.tags : [];
+}
+
+function renderTagChips(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return "";
+  return `<span class="rule-tags">${tags.map(t => `<span class="rule-tag-chip tag-${t}">${escapeHtml(t)}</span>`).join("")}</span>`;
+}
+
+function renderTagSelector(selectedTags, namePrefix) {
+  const prefix = namePrefix || "tags";
+  return `<div class="tag-selector">${RULE_TAGS.map(t => {
+    const checked = Array.isArray(selectedTags) && selectedTags.includes(t) ? "checked" : "";
+    return `<label class="tag-selector-item"><input type="checkbox" name="${prefix}" value="${escapeHtml(t)}" ${checked} /><span class="rule-tag-chip tag-${t}">${escapeHtml(t)}</span></label>`;
+  }).join("")}</div>`;
+}
+
+function renderTagFilterBar(currentFilter) {
+  const chips = [`<button type="button" class="tag-filter-chip ${!currentFilter ? 'active' : ''}" data-tag-filter="">全部</button>`];
+  for (const t of RULE_TAGS) {
+    const active = currentFilter === t ? "active" : "";
+    chips.push(`<button type="button" class="tag-filter-chip ${active}" data-tag-filter="${escapeHtml(t)}"><span class="rule-tag-chip tag-${t}">${escapeHtml(t)}</span></button>`);
+  }
+  return `<div class="tag-filter-bar">${chips.join("")}</div>`;
+}
 
 function loadState() {
   const saved = localStorage.getItem(storageKey);
@@ -434,8 +528,12 @@ function loadState() {
       checklistPlayerFilter: migrated.checklistPlayerFilter || "all",
       filterMustReview: migrated.filterMustReview || false,
       filterViews: Array.isArray(migrated.filterViews) ? migrated.filterViews : [],
-      activeFilterViewId: typeof migrated.activeFilterViewId === "string" ? migrated.activeFilterViewId : ""
-    };
+      activeFilterViewId: typeof migrated.activeFilterViewId === "string" ? migrated.activeFilterViewId : "",
+      tagFilter: typeof migrated.tagFilter === "string" ? migrated.tagFilter : "",
+    listTagFilter: typeof migrated.listTagFilter === "string" ? migrated.listTagFilter : "",
+    checklistTagFilter: typeof migrated.checklistTagFilter === "string" ? migrated.checklistTagFilter : "",
+    partyTagFilter: typeof migrated.partyTagFilter === "string" ? migrated.partyTagFilter : ""
+  };
     if (saved !== JSON.stringify(result)) {
       localStorage.setItem(storageKey, JSON.stringify(result));
     }
@@ -681,6 +779,7 @@ function getFilteredGames() {
   const player = els.playerFilter.value;
   const complexity = els.complexityFilter.value;
   const mustReviewOnly = els.filterMustReview && els.filterMustReview.checked;
+  const listTagFilter = els.listTagFilter ? els.listTagFilter.value : (state.listTagFilter || "");
   const games = state.games.filter((game) => {
     const allRulesText = getAllRulesIncludingExpansions(game).map(ruleText).join("");
     const expansionNames = (game.expansions || []).map((e) => e.name).join("");
@@ -689,7 +788,8 @@ function getFilteredGames() {
     const matchesPlayer = player === "all" || (Number(player) >= game.minPlayers && Number(player) <= game.maxPlayers);
     const matchesComplexity = complexity === "all" || game.complexity === complexity;
     const matchesMustReview = !mustReviewOnly || hasMustReviewRule(game);
-    return matchesKeyword && matchesPlayer && matchesComplexity && matchesMustReview;
+    const matchesTag = !listTagFilter || getAllRulesIncludingExpansions(game).some((r) => ruleTags(r).includes(listTagFilter));
+    return matchesKeyword && matchesPlayer && matchesComplexity && matchesMustReview && matchesTag;
   });
 
   if (els.sortMode.value === "name") return games.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
@@ -926,6 +1026,7 @@ function renderDetail() {
       </div>
       ${renderExpansionSwitcher(game)}
       ${renderReviewSummary(game, currentExpansionId)}
+      ${renderTagFilterBar(state.tagFilter)}
       ${renderLoanStatus(game)}
       ${renderRuleSection("容易忘的规则", "forgets", container?.forgets || [], currentExpansionId)}
       ${renderDisputeSection(game, container?.disputes || [], currentExpansionId)}
@@ -939,6 +1040,7 @@ function renderDetail() {
           <option value="scoring">计分提醒</option>
         </select>
         <textarea id="ruleTextInput" rows="3" placeholder="补充一条${isBaseGame ? "基础游戏" : escapeHtml(currentExpansion?.name || "扩展包")}的规则提醒" required></textarea>
+        ${renderTagSelector([], "newRuleTags")}
         <button class="primary" type="submit">加入规则卡片</button>
       </form>
       <div class="detail-actions">
@@ -966,26 +1068,33 @@ function renderStatusButtons(gameId, ruleKey, ruleIndex, currentStatus, expansio
 }
 
 function renderRuleSection(title, key, items, expansionId = "") {
+  const tagFilter = state.tagFilter || "";
+  const filteredItems = tagFilter
+    ? items.filter((item) => ruleTags(item).includes(tagFilter))
+    : items;
   return `
     <section class="rule-section">
       <h3>${title}</h3>
       <ul class="rule-list">
         ${
-          items
+          filteredItems
             .map(
-              (item, index) => {
+              (item) => {
                 const text = ruleText(item);
                 const status = ruleStatus(item);
+                const tags = ruleTags(item);
                 const statusClass = status ? `status-${status}` : "";
+                const originalIndex = items.indexOf(item);
                 return `
                 <li class="${statusClass}">
                   <div class="rule-content">
                     <span class="rule-text">${escapeHtml(text)}</span>
+                    ${renderTagChips(tags)}
                     ${status ? `<span class="rule-status-label">${REVIEW_STATUS_LABELS[status]}</span>` : ""}
                   </div>
                   <div class="rule-actions">
-                    ${renderStatusButtons(state.selectedId, key, index, status, expansionId)}
-                    <button type="button" class="delete-btn" title="删除" data-rule-key="${key}" data-rule-index="${index}" data-rule-expansion="${expansionId}">×</button>
+                    ${renderStatusButtons(state.selectedId, key, originalIndex, status, expansionId)}
+                    <button type="button" class="delete-btn" title="删除" data-rule-key="${key}" data-rule-index="${originalIndex}" data-rule-expansion="${expansionId}">×</button>
                   </div>
                 </li>
               `;
@@ -1001,10 +1110,16 @@ function renderRuleSection(title, key, items, expansionId = "") {
 function renderDisputeSection(game, items, expansionId = "") {
   const rulings = Array.isArray(game.disputeRulings) ? game.disputeRulings : [];
   const expId = expansionId || "";
-  const disputeItems = items
-    .map((item, index) => {
+  const tagFilter = state.tagFilter || "";
+  const filteredItems = tagFilter
+    ? items.filter((item) => ruleTags(item).includes(tagFilter))
+    : items;
+  const disputeItems = filteredItems
+    .map((item) => {
+      const originalIndex = items.indexOf(item);
       const text = ruleText(item);
       const status = ruleStatus(item);
+      const tags = ruleTags(item);
       const statusClass = status ? `status-${status}` : "";
       const entry = rulings.find((r) => r.disputeText === text && (r.expansionId || "") === expId);
       const hasRulings = entry && entry.rulings.length > 0;
@@ -1034,22 +1149,23 @@ function renderDisputeSection(game, items, expansionId = "") {
       }
 
       return `
-        <li class="dispute-item ${statusClass} ${hasRulings ? "has-rulings" : "no-rulings"}" data-dispute-index="${index}" data-dispute-text="${escapeHtml(text)}" data-dispute-expansion="${expansionId}">
+        <li class="dispute-item ${statusClass} ${hasRulings ? "has-rulings" : "no-rulings"}" data-dispute-index="${originalIndex}" data-dispute-text="${escapeHtml(text)}" data-dispute-expansion="${expansionId}">
           <div class="dispute-header">
             <div class="dispute-header-left">
-              <button type="button" class="dispute-toggle-btn" data-dispute-index="${index}" data-dispute-expansion="${expansionId}" title="展开/收起">▶</button>
+              <button type="button" class="dispute-toggle-btn" data-dispute-index="${originalIndex}" data-dispute-expansion="${expansionId}" title="展开/收起">▶</button>
               <div class="rule-content">
                 <span class="rule-text">${escapeHtml(text)}</span>
                 <div class="dispute-badges">
                   ${unresolvedBadge}
                   ${status ? `<span class="rule-status-label">${REVIEW_STATUS_LABELS[status]}</span>` : ""}
                 </div>
+                ${renderTagChips(tags)}
               </div>
             </div>
             <div class="rule-actions">
-              ${renderStatusButtons(state.selectedId, "disputes", index, status, expansionId)}
-              <button type="button" class="add-ruling-btn" title="新增裁定" data-dispute-index="${index}" data-dispute-expansion="${expansionId}">⚖️</button>
-              <button type="button" class="delete-btn" title="删除" data-rule-key="disputes" data-rule-index="${index}" data-rule-expansion="${expansionId}">×</button>
+              ${renderStatusButtons(state.selectedId, "disputes", originalIndex, status, expansionId)}
+              <button type="button" class="add-ruling-btn" title="新增裁定" data-dispute-index="${originalIndex}" data-dispute-expansion="${expansionId}">⚖️</button>
+              <button type="button" class="delete-btn" title="删除" data-rule-key="disputes" data-rule-index="${originalIndex}" data-rule-expansion="${expansionId}">×</button>
             </div>
           </div>
           ${lastRuling ? `
@@ -1059,7 +1175,7 @@ function renderDisputeSection(game, items, expansionId = "") {
               <span class="latest-ruling-date">（${formatDate(lastRuling.date)}）</span>
             </div>
           ` : ""}
-          <div class="dispute-ruling-panel hidden" data-ruling-panel="${index}" data-ruling-expansion="${expansionId}">
+          <div class="dispute-ruling-panel hidden" data-ruling-panel="${originalIndex}" data-ruling-expansion="${expansionId}">
             ${rulingHistoryHtml || `<p class="dispute-no-rulings">暂无裁定记录，点击 ⚖️ 新增裁定。</p>`}
           </div>
         </li>
@@ -1168,15 +1284,25 @@ function renderChecklist() {
     return;
   }
 
+  const tagFilter = state.checklistTagFilter || "";
+  const filterByTag = (rules) => {
+    if (!tagFilter) return rules;
+    return rules.filter((r) => ruleTags(r).includes(tagFilter));
+  };
+
   function buildRuleGroups(source) {
-    const forgetsHtml = source.forgets.length
-      ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${source.forgets.map((f) => `<li>${escapeHtml(ruleText(f))}</li>`).join("")}</ul></div>`
+    const filteredForges = filterByTag(source.forgets || []);
+    const filteredSetup = filterByTag(source.setup || []);
+    const filteredScoring = filterByTag(source.scoring || []);
+
+    const forgetsHtml = filteredForges.length
+      ? `<div class="checklist-rule-group"><h5>⚠️ 容易忘的规则</h5><ul>${filteredForges.map((f) => `<li>${escapeHtml(ruleText(f))}${renderTagChips(ruleTags(f))}</li>`).join("")}</ul></div>`
       : "";
-    const setupHtml = source.setup.length
-      ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${source.setup.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
+    const setupHtml = filteredSetup.length
+      ? `<div class="checklist-rule-group"><h5>📦 开局准备</h5><ul>${filteredSetup.map((s) => `<li>${escapeHtml(ruleText(s))}${renderTagChips(ruleTags(s))}</li>`).join("")}</ul></div>`
       : "";
-    const scoringHtml = source.scoring.length
-      ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${source.scoring.map((s) => `<li>${escapeHtml(ruleText(s))}</li>`).join("")}</ul></div>`
+    const scoringHtml = filteredScoring.length
+      ? `<div class="checklist-rule-group"><h5>🏆 计分提醒</h5><ul>${filteredScoring.map((s) => `<li>${escapeHtml(ruleText(s))}${renderTagChips(ruleTags(s))}</li>`).join("")}</ul></div>`
       : "";
     return forgetsHtml + setupHtml + scoringHtml;
   }
@@ -1732,7 +1858,8 @@ function getCurrentFilterState() {
     playerFilter: els.playerFilter.value,
     complexityFilter: els.complexityFilter.value,
     sortMode: els.sortMode.value,
-    filterMustReview: els.filterMustReview ? els.filterMustReview.checked : false
+    filterMustReview: els.filterMustReview ? els.filterMustReview.checked : false,
+    listTagFilter: els.listTagFilter ? els.listTagFilter.value : ""
   };
 }
 
@@ -1745,6 +1872,10 @@ function applyFilterState(filterState) {
   if (els.filterMustReview) {
     els.filterMustReview.checked = !!filterState.filterMustReview;
     state.filterMustReview = !!filterState.filterMustReview;
+  }
+  if (els.listTagFilter) {
+    els.listTagFilter.value = filterState.listTagFilter || "";
+    state.listTagFilter = filterState.listTagFilter || "";
   }
 }
 
@@ -1759,7 +1890,8 @@ function normalizeFilterView(view) {
       playerFilter: String(state.playerFilter || "all"),
       complexityFilter: String(state.complexityFilter || "all"),
       sortMode: String(state.sortMode || "stale"),
-      filterMustReview: !!state.filterMustReview
+      filterMustReview: !!state.filterMustReview,
+      listTagFilter: String(state.listTagFilter || "")
     },
     createdAt: view.createdAt || new Date().toISOString()
   };
@@ -1776,6 +1908,7 @@ function describeFilterState(filterState) {
   const sortLabels = { stale: "最近未玩排序", name: "名称排序", complexity: "复杂度排序" };
   parts.push(sortLabels[filterState.sortMode] || filterState.sortMode);
   if (filterState.filterMustReview) parts.push("只看必看");
+  if (filterState.listTagFilter) parts.push(`标签:${filterState.listTagFilter}`);
   return parts.join(" · ");
 }
 
@@ -1882,6 +2015,12 @@ function renderAll() {
   if (els.filterMustReview) {
     els.filterMustReview.checked = state.filterMustReview;
   }
+  if (els.listTagFilter) {
+    els.listTagFilter.value = state.listTagFilter || "";
+  }
+  if (els.checklistTagFilter) {
+    els.checklistTagFilter.value = state.checklistTagFilter || "";
+  }
   renderSummary();
   renderFilterViews();
   renderList();
@@ -1976,6 +2115,13 @@ els.sortMode.addEventListener("change", () => {
   state.activeFilterViewId = "";
   renderAll();
 });
+if (els.listTagFilter) {
+  els.listTagFilter.addEventListener("change", () => {
+    state.listTagFilter = els.listTagFilter.value;
+    state.activeFilterViewId = "";
+    renderAll();
+  });
+}
 if (els.filterMustReview) {
   els.filterMustReview.addEventListener("change", () => {
     state.filterMustReview = els.filterMustReview.checked;
@@ -2039,7 +2185,12 @@ els.detailView.addEventListener("submit", (event) => {
   if (!text) return;
   const container = getCurrentRuleContainer(game);
   if (!container) return;
-  container[key].push(normalizeRule(text));
+  const selectedTags = [];
+  document.querySelectorAll('#ruleForm input[name="newRuleTags"]:checked').forEach((cb) => {
+    if (RULE_TAGS.includes(cb.value)) selectedTags.push(cb.value);
+  });
+  const newRule = createRuleCard(text, REVIEW_STATUS.UNMARKED, null, selectedTags);
+  container[key].push(newRule);
   if (key === "disputes") {
     ensureDisputeRulingEntry(game, text, state.selectedExpansionId || "");
   }
@@ -2047,6 +2198,13 @@ els.detailView.addEventListener("submit", (event) => {
 });
 
 els.detailView.addEventListener("click", (event) => {
+  const tagFilterChip = event.target.closest("[data-tag-filter]");
+  if (tagFilterChip) {
+    state.tagFilter = tagFilterChip.dataset.tagFilter || "";
+    renderDetail();
+    return;
+  }
+
   const statusButton = event.target.closest("[data-status]");
   const ruleButton = event.target.closest(".delete-btn[data-rule-key]");
   const playedButton = event.target.closest("#playedTodayBtn");
@@ -2477,7 +2635,8 @@ async function handleImportFile(file) {
               playerFilter: "all",
               complexityFilter: "all",
               sortMode: "stale",
-              filterMustReview: false
+              filterMustReview: false,
+              listTagFilter: ""
             });
           }
         } else {
@@ -2486,7 +2645,8 @@ async function handleImportFile(file) {
             playerFilter: "all",
             complexityFilter: "all",
             sortMode: "stale",
-            filterMustReview: false
+            filterMustReview: false,
+            listTagFilter: ""
           });
         }
         renderAll();
@@ -2520,6 +2680,12 @@ function resetToDefault() {
       if (els.sortMode) els.sortMode.value = "stale";
       if (els.filterMustReview) els.filterMustReview.checked = false;
       state.filterMustReview = false;
+      state.tagFilter = "";
+      state.listTagFilter = "";
+      state.checklistTagFilter = "";
+      state.partyTagFilter = "";
+      if (els.listTagFilter) els.listTagFilter.value = "";
+      if (els.checklistTagFilter) els.checklistTagFilter.value = "";
       saveState();
       renderAll();
       showBackupMessage("已恢复默认示例数据。", "success");
@@ -2536,6 +2702,16 @@ els.checklistPlayerFilter.addEventListener("change", () => {
   state.checklistPlayerFilter = els.checklistPlayerFilter.value;
   renderAll();
 });
+
+if (els.checklistTagFilter) {
+  els.checklistTagFilter.addEventListener("change", () => {
+    state.checklistTagFilter = els.checklistTagFilter.value;
+    if (!els.checklistView.classList.contains("hidden")) {
+      renderChecklist();
+    }
+    saveState();
+  });
+}
 
 els.checklistGameList.addEventListener("change", (event) => {
   const gameCheckbox = event.target.closest("[data-checklist-id]");
@@ -2912,10 +3088,14 @@ const RULE_CONTAINER_MAP = {
   scoring: "editScoringContainer"
 };
 
-function renderEditRuleItem(ruleKey, originalIndex, ruleText) {
+function renderEditRuleItem(ruleKey, originalIndex, ruleText, tags) {
+  const ruleTagsList = Array.isArray(tags) ? tags : [];
   return `
     <div class="edit-rule-item" data-rule-key="${ruleKey}" data-rule-index="${originalIndex}">
-      <textarea class="edit-rule-textarea" placeholder="请输入规则内容" rows="2">${escapeHtml(ruleText)}</textarea>
+      <div class="edit-rule-content">
+        <textarea class="edit-rule-textarea" placeholder="请输入规则内容" rows="2">${escapeHtml(ruleText)}</textarea>
+        ${renderTagSelector(ruleTagsList, `editTag_${ruleKey}_${originalIndex}`)}
+      </div>
       <button type="button" class="edit-remove-rule-btn" title="删除此条">×</button>
     </div>
   `;
@@ -2926,7 +3106,7 @@ function renderEditRules(ruleKey, rules) {
   const container = els[containerKey];
   if (!container) return;
   container.innerHTML = rules
-    .map((rule, index) => renderEditRuleItem(ruleKey, index, ruleText(rule)))
+    .map((rule, index) => renderEditRuleItem(ruleKey, index, ruleText(rule), ruleTags(rule)))
     .join("");
 }
 
@@ -2953,9 +3133,15 @@ function collectEditRulesFromUI() {
       const text = ta.value.trim();
       if (text) {
         const originalIndex = Number(item.dataset.ruleIndex);
-        const container = getRuleContainer(editSnapshot, editExpansionId);
-        const originalRule = Number.isInteger(originalIndex) && container ? container[ruleKey]?.[originalIndex] : undefined;
-        const nextRule = originalRule === undefined ? normalizeRule(text) : { ...normalizeRule(originalRule), text };
+        const ruleContainer = getRuleContainer(editSnapshot, editExpansionId);
+        const originalRule = Number.isInteger(originalIndex) && ruleContainer ? ruleContainer[ruleKey]?.[originalIndex] : undefined;
+        const selectedTags = [];
+        item.querySelectorAll('input[name^="editTag_"]:checked').forEach((cb) => {
+          if (RULE_TAGS.includes(cb.value)) selectedTags.push(cb.value);
+        });
+        const nextRule = originalRule === undefined
+          ? { ...normalizeRule(text), tags: selectedTags }
+          : { ...normalizeRule(originalRule), text, tags: selectedTags };
         result[ruleKey].push(nextRule);
       }
     });
@@ -3314,10 +3500,15 @@ function startPartyConfig() {
 
 function cancelPartyConfig() {
   partyState = null;
+  state.partyTagFilter = "";
   els.partyIntro.classList.remove("hidden");
   els.partyConfigView.classList.add("hidden");
   els.partyResultView.classList.add("hidden");
+  if (els.partyTagFilterContainer) {
+    els.partyTagFilterContainer.classList.add("hidden");
+  }
   updatePartyStatusLabel("未启动");
+  saveState();
 }
 
 function renderPartyCandidates() {
@@ -3556,14 +3747,17 @@ function renderPartyRecommendations(recommendations) {
   `;
 }
 
-function renderPartyPreparationSection(title, icon, items, className) {
-  if (!items || items.length === 0) {
-    return `<div class="party-prep-section"><div class="party-prep-section-label ${className}">${icon} ${title}</div><span class="party-prep-empty">暂无记录</span></div>`;
+function renderPartyPreparationSection(title, icon, items, className, tagFilter = "") {
+  const filteredItems = tagFilter
+    ? items.filter((r) => ruleTags(r).includes(tagFilter))
+    : items;
+  if (!filteredItems || filteredItems.length === 0) {
+    return `<div class="party-prep-section"><div class="party-prep-section-label ${className}">${icon} ${title}</div><span class="party-prep-empty">${tagFilter ? "该标签下暂无记录" : "暂无记录"}</span></div>`;
   }
   return `
     <div class="party-prep-section">
-      <div class="party-prep-section-label ${className}">${icon} ${title}（${items.length} 条）</div>
-      <ul>${items.map((t) => `<li>${escapeHtml(ruleText(t))}</li>`).join("")}</ul>
+      <div class="party-prep-section-label ${className}">${icon} ${title}（${filteredItems.length} 条）</div>
+      <ul>${filteredItems.map((t) => `<li>${escapeHtml(ruleText(t))}${renderTagChips(ruleTags(t))}</li>`).join("")}</ul>
     </div>
   `;
 }
@@ -3575,7 +3769,17 @@ function renderPartyPreparation(recommendations) {
 
   if (relevantGames.length === 0) {
     els.partyPreparation.innerHTML = "";
+    if (els.partyTagFilterContainer) {
+      els.partyTagFilterContainer.classList.add("hidden");
+    }
     return;
+  }
+
+  const tagFilter = state.partyTagFilter || "";
+
+  if (els.partyTagFilterContainer) {
+    els.partyTagFilterContainer.innerHTML = renderTagFilterBar(tagFilter);
+    els.partyTagFilterContainer.classList.remove("hidden");
   }
 
   const html = relevantGames
@@ -3608,9 +3812,9 @@ function renderPartyPreparation(recommendations) {
             <span class="pill">${game.duration}分钟</span>
           </div>
           <div class="party-prep-game-body">
-            ${renderPartyPreparationSection("开局准备", "📦", allSetup, "setup")}
-            ${renderPartyPreparationSection("容易忘的规则", "⚠️", uniqueForges, "forget")}
-            ${renderPartyPreparationSection("争议提醒", "⚖️", allDisputes, "dispute")}
+            ${renderPartyPreparationSection("开局准备", "📦", allSetup, "setup", tagFilter)}
+            ${renderPartyPreparationSection("容易忘的规则", "⚠️", uniqueForges, "forget", tagFilter)}
+            ${renderPartyPreparationSection("争议提醒", "⚖️", allDisputes, "dispute", tagFilter)}
             <div style="margin-top:10px;">
               <button type="button" class="party-jump-to-detail text-btn" data-game-id="${game.id}">📖 打开完整详情页 →</button>
             </div>
@@ -3791,8 +3995,19 @@ els.partyResetBtn?.addEventListener("click", () => {
 });
 
 els.partyResultView?.addEventListener("click", (e) => {
+  const tagFilterChip = e.target.closest("[data-tag-filter]");
   const toggleHeader = e.target.closest("[data-prep-toggle]");
   const jumpBtn = e.target.closest(".party-jump-to-detail");
+
+  if (tagFilterChip) {
+    state.partyTagFilter = tagFilterChip.dataset.tagFilter || "";
+    saveState();
+    if (partyState) {
+      const recommendations = generatePartyRecommendations();
+      renderPartyPreparation(recommendations);
+    }
+    return;
+  }
 
   if (toggleHeader) {
     const gameId = toggleHeader.dataset.prepToggle;

@@ -58,6 +58,17 @@
           </select>
         </label>
         <label>
+          标签
+          <select id="listTagFilter">
+            <option value="">全部标签</option>
+            <option value="易错结算">易错结算</option>
+            <option value="开局流程">开局流程</option>
+            <option value="新人教学">新人教学</option>
+            <option value="扩展专属">扩展专属</option>
+            <option value="计分终局">计分终局</option>
+          </select>
+        </label>
+        <label>
           排序
           <select id="sortMode">
             <option value="stale">最近未玩</option>
@@ -118,6 +129,17 @@
               <option value="4">4人</option>
               <option value="5">5人</option>
               <option value="6">6人+</option>
+            </select>
+          </label>
+          <label class="checklist-filter">
+            按标签筛选
+            <select id="checklistTagFilter">
+              <option value="">全部标签</option>
+              <option value="易错结算">易错结算</option>
+              <option value="开局流程">开局流程</option>
+              <option value="新人教学">新人教学</option>
+              <option value="扩展专属">扩展专属</option>
+              <option value="计分终局">计分终局</option>
             </select>
           </label>
           <div class="checklist-actions">
@@ -213,6 +235,7 @@
             </div>
           </div>
           <div id="partyRecommendations" class="party-recommendations"></div>
+          <div id="partyTagFilterContainer" class="party-tag-filter-container hidden"></div>
           <div id="partyPreparation" class="party-preparation"></div>
         </div>
       </section>
