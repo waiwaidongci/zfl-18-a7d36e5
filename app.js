@@ -1195,14 +1195,18 @@ function renderChecklist() {
 
       let baseSectionHtml = "";
       if (baseRuleHtml) {
-        baseSectionHtml = `
-          <div class="checklist-base-section">
-            <div class="checklist-base-header">
-              <h5 class="checklist-base-title">🎮 基础游戏</h5>
+        if (game.expansions && game.expansions.length > 0) {
+          baseSectionHtml = `
+            <div class="checklist-base-section">
+              <div class="checklist-base-header">
+                <h5 class="checklist-base-title">🎮 基础游戏</h5>
+              </div>
+              ${baseRuleHtml}
             </div>
-            ${baseRuleHtml}
-          </div>
-        `;
+          `;
+        } else {
+          baseSectionHtml = baseRuleHtml;
+        }
       }
 
       const totalContent = baseSectionHtml + expansionsHtml;
