@@ -1957,7 +1957,22 @@ async function handleImportFile(file) {
             applyFilterState(activeView.filterState);
           } else {
             state.activeFilterViewId = "";
+            applyFilterState({
+              keyword: "",
+              playerFilter: "all",
+              complexityFilter: "all",
+              sortMode: "stale",
+              filterMustReview: false
+            });
           }
+        } else {
+          applyFilterState({
+            keyword: "",
+            playerFilter: "all",
+            complexityFilter: "all",
+            sortMode: "stale",
+            filterMustReview: false
+          });
         }
         renderAll();
         const successMsg = importedFilterViews.length > 0
