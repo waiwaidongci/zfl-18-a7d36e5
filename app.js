@@ -3678,9 +3678,13 @@ function generatePartyRecommendations() {
   if (!partyState) return [];
 
   const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+  const tagFilter = state.partyTagFilter || "";
   const scored = candidateGames.map((game) => {
     const { score, reasons, warnings } = calculateGameScore(game, partyState.players);
     return { game, score, reasons, warnings };
+  }).filter((item) => {
+    if (!tagFilter) return true;
+    return getAllRulesIncludingExpansions(item.game).some((rule) => ruleTags(rule).includes(tagFilter));
   });
 
   scored.sort((a, b) => b.score - a.score);
@@ -3689,11 +3693,18 @@ function generatePartyRecommendations() {
 
 function renderPartyRecCard(item, rank) {
   const { game, score, reasons, warnings } = item;
+  const tagFilter = state.partyTagFilter || "";
+  const matchingRules = tagFilter
+    ? getAllRulesIncludingExpansions(game).filter((rule) => ruleTags(rule).includes(tagFilter))
+    : [];
   const isTop = rank === 0;
   const cardClass = isTop ? "recommended" : "alternative";
   const badge = isTop
     ? `<span class="party-rec-badge top">⭐ 首推</span>`
     : `<span class="party-rec-badge alt">备选</span>`;
+  const tagMatchHtml = tagFilter
+    ? `<div class="party-rec-tag-match">${renderTagChips([tagFilter])}<span>${matchingRules.length} 条匹配规则</span></div>`
+    : "";
 
   const reasonsHtml =
     reasons.length > 0
@@ -3723,6 +3734,7 @@ function renderPartyRecCard(item, rank) {
           <span class="pill heavy">${escapeHtml(game.complexity)}</span>
           <span class="pill">${daysSince(game.lastPlayed)}天未玩</span>
         </div>
+        ${tagMatchHtml}
         ${reasonsHtml}
         ${warningsHtml}
         <div style="margin-top:8px;">
@@ -3737,7 +3749,11 @@ function renderPartyRecommendations(recommendations) {
   if (!els.partyRecommendations) return;
 
   if (recommendations.length === 0) {
-    els.partyRecommendations.innerHTML = `<p class="checklist-empty">没有候选游戏可推荐，请回到上一步选择至少一个桌游。</p>`;
+    const tagFilter = state.partyTagFilter || "";
+    const emptyText = tagFilter
+      ? `没有包含「${escapeHtml(tagFilter)}」标签的候选游戏。`
+      : "没有候选游戏可推荐，请回到上一步选择至少一个桌游。";
+    els.partyRecommendations.innerHTML = `<p class="checklist-empty">${emptyText}</p>`;
     return;
   }
 
@@ -4004,6 +4020,7 @@ els.partyResultView?.addEventListener("click", (e) => {
     saveState();
     if (partyState) {
       const recommendations = generatePartyRecommendations();
+      renderPartyRecommendations(recommendations);
       renderPartyPreparation(recommendations);
     }
     return;
