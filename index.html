@@ -475,6 +475,86 @@
         </div>
       </div>
 
+      <div id="importPreviewDialog" class="dialog-overlay hidden">
+        <div class="dialog import-preview-dialog">
+          <div class="import-preview-header">
+            <h3>📥 导入预览</h3>
+            <button id="importPreviewCloseBtn" type="button" class="import-preview-close" title="关闭">✕</button>
+          </div>
+          <div class="import-preview-stats">
+            <div class="import-stat new">
+              <div class="import-stat-icon">➕</div>
+              <div class="import-stat-info">
+                <span class="import-stat-label">新增桌游</span>
+                <strong id="importStatNew">0</strong>
+              </div>
+            </div>
+            <div class="import-stat overwrite">
+              <div class="import-stat-icon">🔄</div>
+              <div class="import-stat-info">
+                <span class="import-stat-label">可覆盖</span>
+                <strong id="importStatOverwrite">0</strong>
+              </div>
+            </div>
+            <div class="import-stat skip">
+              <div class="import-stat-icon">⏭️</div>
+              <div class="import-stat-info">
+                <span class="import-stat-label">跳过（完全相同）</span>
+                <strong id="importStatSkip">0</strong>
+              </div>
+            </div>
+            <div class="import-stat conflict">
+              <div class="import-stat-icon">⚠️</div>
+              <div class="import-stat-info">
+                <span class="import-stat-label">可能冲突</span>
+                <strong id="importStatConflict">0</strong>
+              </div>
+            </div>
+          </div>
+          <div class="import-preview-global-strategy">
+            <h4>全局合并策略（同名桌游）</h4>
+            <div class="import-global-strategy-options">
+              <label class="import-strategy-option">
+                <input type="radio" name="importGlobalStrategy" value="overwrite" />
+                <span>
+                  <strong>覆盖本地</strong>
+                  <small>用导入的数据替换本地数据</small>
+                </span>
+              </label>
+              <label class="import-strategy-option">
+                <input type="radio" name="importGlobalStrategy" value="keep" checked />
+                <span>
+                  <strong>保留本地</strong>
+                  <small>忽略导入的同名桌游</small>
+                </span>
+              </label>
+              <label class="import-strategy-option">
+                <input type="radio" name="importGlobalStrategy" value="merge" />
+                <span>
+                  <strong>智能合并</strong>
+                  <small>合并规则、扩展包、借出记录等</small>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div class="import-preview-filter">
+            <div class="import-filter-tabs">
+              <button type="button" class="import-filter-tab active" data-import-filter="all">全部</button>
+              <button type="button" class="import-filter-tab" data-import-filter="new">新增</button>
+              <button type="button" class="import-filter-tab" data-import-filter="conflict">冲突</button>
+            </div>
+          </div>
+          <div id="importPreviewList" class="import-preview-list"></div>
+          <div class="import-preview-summary">
+            <p id="importPreviewSummaryText">共 0 个桌游将被处理</p>
+          </div>
+          <div class="dialog-actions">
+            <button id="importPreviewCancelBtn" type="button">取消</button>
+            <button id="importPreviewConfirmBtn" type="button" class="primary">确认导入</button>
+          </div>
+        </div>
+      </div>
+
       <div id="editDialog" class="dialog-overlay hidden">
         <div class="dialog edit-dialog">
           <h3 id="editDialogTitle">编辑桌游</h3>

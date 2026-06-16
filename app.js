@@ -542,7 +542,18 @@ const els = {
   reviewSessionProgress: document.querySelector("#reviewSessionProgress"),
   reviewSessionProgressFill: document.querySelector("#reviewSessionProgressFill"),
   reviewSessionContent: document.querySelector("#reviewSessionContent"),
-  reviewSessionCloseBtn: document.querySelector("#reviewSessionCloseBtn")
+  reviewSessionCloseBtn: document.querySelector("#reviewSessionCloseBtn"),
+  importPreviewDialog: document.querySelector("#importPreviewDialog"),
+  importPreviewCloseBtn: document.querySelector("#importPreviewCloseBtn"),
+  importPreviewCancelBtn: document.querySelector("#importPreviewCancelBtn"),
+  importPreviewConfirmBtn: document.querySelector("#importPreviewConfirmBtn"),
+  importStatNew: document.querySelector("#importStatNew"),
+  importStatOverwrite: document.querySelector("#importStatOverwrite"),
+  importStatSkip: document.querySelector("#importStatSkip"),
+  importStatConflict: document.querySelector("#importStatConflict"),
+  importPreviewList: document.querySelector("#importPreviewList"),
+  importPreviewSummaryText: document.querySelector("#importPreviewSummaryText"),
+  importFilterTabs: document.querySelectorAll(".import-filter-tab")
 };
 
 function ruleTags(rule) {
@@ -2972,6 +2983,550 @@ function validateImportData(data) {
   return games;
 }
 
+const IMPORT_ITEM_STATUS = {
+  NEW: "new",
+  OVERWRITE: "overwrite",
+  SKIP: "skip",
+  CONFLICT: "conflict"
+};
+
+const MERGE_STRATEGY = {
+  OVERWRITE: "overwrite",
+  KEEP: "keep",
+  MERGE: "merge"
+};
+
+let importPreviewState = {
+  importItems: [],
+  globalStrategy: MERGE_STRATEGY.KEEP,
+  individualStrategies: {},
+  filter: "all",
+  importData: null,
+  importedFilterViews: [],
+  importedActiveFilterViewId: ""
+};
+
+function normalizeImportGame(game) {
+  const normalized = {
+    id: game.id || generateId(),
+    name: String(game.name || ""),
+    minPlayers: Math.max(1, Number(game.minPlayers) || 2),
+    maxPlayers: Math.max(1, Number(game.maxPlayers) || 4),
+    duration: Math.max(5, Number(game.duration) || 60),
+    complexity: ["轻", "中", "重"].includes(game.complexity) ? game.complexity : "中",
+    lastPlayed: normalizeLastPlayed(game.lastPlayed),
+    cover: String(game.cover || ""),
+    forgets: normalizeRuleArray(game.forgets),
+    disputes: normalizeRuleArray(game.disputes),
+    setup: normalizeRuleArray(game.setup),
+    scoring: normalizeRuleArray(game.scoring),
+    loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : [],
+    expansions: normalizeExpansionArray(game.expansions),
+    disputeRulings: normalizeDisputeRulings(game.disputeRulings)
+  };
+  if (normalized.minPlayers > normalized.maxPlayers) {
+    normalized.maxPlayers = normalized.minPlayers;
+  }
+  const newContainers = [{ disputes: normalized.disputes, expansionId: "" }];
+  for (const exp of normalized.expansions || []) {
+    newContainers.push({ disputes: exp.disputes, expansionId: exp.id });
+  }
+  syncDisputeRulingsForGame(normalized, null, newContainers);
+  return normalized;
+}
+
+function isSameGame(a, b) {
+  if (!a || !b) return false;
+  const aName = a.name?.trim().toLowerCase() || "";
+  const bName = b.name?.trim().toLowerCase() || "";
+  return aName === bName;
+}
+
+function areGamesIdentical(a, b) {
+  if (!isSameGame(a, b)) return false;
+  const aSimple = {
+    minPlayers: a.minPlayers,
+    maxPlayers: a.maxPlayers,
+    duration: a.duration,
+    complexity: a.complexity,
+    lastPlayed: a.lastPlayed,
+    cover: a.cover ? a.cover.substring(0, 100) : ""
+  };
+  const bSimple = {
+    minPlayers: b.minPlayers,
+    maxPlayers: b.maxPlayers,
+    duration: b.duration,
+    complexity: b.complexity,
+    lastPlayed: b.lastPlayed,
+    cover: b.cover ? b.cover.substring(0, 100) : ""
+  };
+  if (JSON.stringify(aSimple) !== JSON.stringify(bSimple)) return false;
+  const aRules = JSON.stringify([...(a.forgets || []), ...(a.disputes || []), ...(a.setup || []), ...(a.scoring || [])].map(r => r.text));
+  const bRules = JSON.stringify([...(b.forgets || []), ...(b.disputes || []), ...(b.setup || []), ...(b.scoring || [])].map(r => r.text));
+  if (aRules !== bRules) return false;
+  const aExpNames = (a.expansions || []).map(e => e.name).sort().join(",");
+  const bExpNames = (b.expansions || []).map(e => e.name).sort().join(",");
+  if (aExpNames !== bExpNames) return false;
+  return true;
+}
+
+function hasConflict(localGame, importGame) {
+  if (!localGame || !importGame) return false;
+  if (areGamesIdentical(localGame, importGame)) return false;
+  const localHasRules = getAllRulesIncludingExpansions(localGame).length > 0;
+  const importHasRules = getAllRulesIncludingExpansions(importGame).length > 0;
+  const localHasLoans = (localGame.loanRecords || []).length > 0;
+  const importHasLoans = (importGame.loanRecords || []).length > 0;
+  const localHasCover = !!localGame.cover;
+  const importHasCover = !!importGame.cover;
+  if (localHasRules && importHasRules) {
+    const localTexts = new Set(getAllRulesIncludingExpansions(localGame).map(r => r.text));
+    const importTexts = new Set(getAllRulesIncludingExpansions(importGame).map(r => r.text));
+    let hasUniqueLocal = false;
+    let hasUniqueImport = false;
+    for (const t of localTexts) if (!importTexts.has(t)) { hasUniqueLocal = true; break; }
+    for (const t of importTexts) if (!localTexts.has(t)) { hasUniqueImport = true; break; }
+    if (hasUniqueLocal && hasUniqueImport) return true;
+  }
+  const localExpNames = new Set((localGame.expansions || []).map(e => e.name));
+  const importExpNames = new Set((importGame.expansions || []).map(e => e.name));
+  let hasUniqueLocalExp = false;
+  let hasUniqueImportExp = false;
+  for (const n of localExpNames) if (!importExpNames.has(n)) { hasUniqueLocalExp = true; break; }
+  for (const n of importExpNames) if (!localExpNames.has(n)) { hasUniqueImportExp = true; break; }
+  if (hasUniqueLocalExp && hasUniqueImportExp) return true;
+  if (localHasLoans && importHasLoans) return true;
+  if (localHasCover && importHasCover && localGame.cover !== importGame.cover) return true;
+  return false;
+}
+
+function detectDifferences(localGame, importGame) {
+  const diffs = [];
+  if (!localGame) return diffs;
+  if (localGame.minPlayers !== importGame.minPlayers || localGame.maxPlayers !== importGame.maxPlayers) {
+    diffs.push({ type: "meta", field: "人数", local: `${localGame.minPlayers}-${localGame.maxPlayers}人`, imported: `${importGame.minPlayers}-${importGame.maxPlayers}人` });
+  }
+  if (localGame.duration !== importGame.duration) {
+    diffs.push({ type: "meta", field: "时长", local: `${localGame.duration}分钟`, imported: `${importGame.duration}分钟` });
+  }
+  if (localGame.complexity !== importGame.complexity) {
+    diffs.push({ type: "meta", field: "复杂度", local: localGame.complexity, imported: importGame.complexity });
+  }
+  if (localGame.lastPlayed !== importGame.lastPlayed) {
+    diffs.push({ type: "meta", field: "上次游玩", local: localGame.lastPlayed, imported: importGame.lastPlayed });
+  }
+  const localRules = getAllRulesIncludingExpansions(localGame);
+  const importRules = getAllRulesIncludingExpansions(importGame);
+  const localTexts = new Set(localRules.map(r => r.text));
+  const importTexts = new Set(importRules.map(r => r.text));
+  const onlyLocal = [...localTexts].filter(t => !importTexts.has(t)).length;
+  const onlyImport = [...importTexts].filter(t => !localTexts.has(t)).length;
+  if (onlyLocal > 0 || onlyImport > 0) {
+    diffs.push({ type: "rules", field: "规则", local: `${onlyLocal} 条本地独有`, imported: `${onlyImport} 条导入独有` });
+  }
+  const localExpNames = new Set((localGame.expansions || []).map(e => e.name));
+  const importExpNames = new Set((importGame.expansions || []).map(e => e.name));
+  const onlyLocalExp = [...localExpNames].filter(n => !importExpNames.has(n)).length;
+  const onlyImportExp = [...importExpNames].filter(n => !localExpNames.has(n)).length;
+  if (onlyLocalExp > 0 || onlyImportExp > 0) {
+    diffs.push({ type: "expansions", field: "扩展包", local: `${onlyLocalExp} 个本地独有`, imported: `${onlyImportExp} 个导入独有` });
+  }
+  const localLoans = (localGame.loanRecords || []).length;
+  const importLoans = (importGame.loanRecords || []).length;
+  if (localLoans > 0 || importLoans > 0) {
+    diffs.push({ type: "loans", field: "借出记录", local: `${localLoans} 条`, imported: `${importLoans} 条` });
+  }
+  if (!!localGame.cover !== !!importGame.cover || (localGame.cover && importGame.cover && localGame.cover !== importGame.cover)) {
+    diffs.push({ type: "cover", field: "封面", local: localGame.cover ? "有封面" : "无封面", imported: importGame.cover ? "有封面" : "无封面" });
+  }
+  return diffs;
+}
+
+function analyzeImportData(importGames) {
+  const items = [];
+  const localGamesMap = new Map();
+  for (const g of state.games) {
+    localGamesMap.set(g.name.trim().toLowerCase(), g);
+  }
+  for (const importGame of importGames) {
+    const normalized = normalizeImportGame(importGame);
+    const key = normalized.name.trim().toLowerCase();
+    const localGame = localGamesMap.get(key);
+    let status;
+    let localMatch = null;
+    if (!localGame) {
+      status = IMPORT_ITEM_STATUS.NEW;
+    } else if (areGamesIdentical(localGame, normalized)) {
+      status = IMPORT_ITEM_STATUS.SKIP;
+      localMatch = localGame;
+    } else if (hasConflict(localGame, normalized)) {
+      status = IMPORT_ITEM_STATUS.CONFLICT;
+      localMatch = localGame;
+    } else {
+      status = IMPORT_ITEM_STATUS.OVERWRITE;
+      localMatch = localGame;
+    }
+    items.push({
+      id: normalized.id,
+      name: normalized.name,
+      status,
+      importGame: normalized,
+      localGame: localMatch,
+      differences: detectDifferences(localMatch, normalized),
+      strategy: status === IMPORT_ITEM_STATUS.NEW ? MERGE_STRATEGY.MERGE : MERGE_STRATEGY.KEEP
+    });
+  }
+  return items;
+}
+
+function mergeRuleArrays(localRules, importRules) {
+  const localMap = new Map();
+  for (const r of localRules) {
+    localMap.set(r.text.toLowerCase(), r);
+  }
+  const importMap = new Map();
+  for (const r of importRules) {
+    importMap.set(r.text.toLowerCase(), r);
+  }
+  const merged = [];
+  const seen = new Set();
+  for (const r of localRules) {
+    const key = r.text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const importRule = importMap.get(key);
+    if (importRule) {
+      const statusPriority = {
+        [REVIEW_STATUS.MUST_REVIEW]: 4,
+        [REVIEW_STATUS.STILL_FORGET]: 3,
+        [REVIEW_STATUS.UNMARKED]: 2,
+        [REVIEW_STATUS.MASTERED]: 1,
+        null: 0
+      };
+      const localPriority = statusPriority[r.status] || 0;
+      const importPriority = statusPriority[importRule.status] || 0;
+      const mergedRule = {
+        ...r,
+        status: localPriority >= importPriority ? r.status : importRule.status,
+        tags: [...new Set([...(r.tags || []), ...(importRule.tags || [])])]
+      };
+      merged.push(mergedRule);
+    } else {
+      merged.push({ ...r });
+    }
+  }
+  for (const r of importRules) {
+    const key = r.text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ ...r });
+  }
+  return merged;
+}
+
+function mergeExpansions(localGame, importGame) {
+  const localMap = new Map();
+  for (const e of localGame.expansions || []) {
+    localMap.set(e.name.trim().toLowerCase(), e);
+  }
+  const importMap = new Map();
+  for (const e of importGame.expansions || []) {
+    importMap.set(e.name.trim().toLowerCase(), e);
+  }
+  const merged = [];
+  const seen = new Set();
+  for (const e of localGame.expansions || []) {
+    const key = e.name.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const importExp = importMap.get(key);
+    if (importExp) {
+      const mergedExp = {
+        ...e,
+        forgets: mergeRuleArrays(e.forgets || [], importExp.forgets || []),
+        disputes: mergeRuleArrays(e.disputes || [], importExp.disputes || []),
+        setup: mergeRuleArrays(e.setup || [], importExp.setup || []),
+        scoring: mergeRuleArrays(e.scoring || [], importExp.scoring || [])
+      };
+      merged.push(mergedExp);
+    } else {
+      merged.push({ ...e });
+    }
+  }
+  for (const e of importGame.expansions || []) {
+    const key = e.name.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ ...e });
+  }
+  return merged;
+}
+
+function mergeDisputeRulings(localGame, importGame, mergedExpansions) {
+  const localRulings = localGame.disputeRulings || [];
+  const importRulings = importGame.disputeRulings || [];
+  const localMap = new Map();
+  for (const r of localRulings) {
+    const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
+    localMap.set(key, r);
+  }
+  const importMap = new Map();
+  for (const r of importRulings) {
+    const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
+    importMap.set(key, r);
+  }
+  const mergedEntries = [];
+  const seen = new Set();
+  const expNameToId = new Map();
+  for (const e of mergedExpansions || []) {
+    expNameToId.set(e.name.trim().toLowerCase(), e.id);
+  }
+  for (const r of localRulings) {
+    const key = `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const importEntry = importMap.get(key);
+    if (importEntry) {
+      const allRulings = [...(r.rulings || []), ...(importEntry.rulings || [])];
+      const rulingMap = new Map();
+      for (const ruling of allRulings) {
+        const rulingKey = `${ruling.date}::${ruling.decision.toLowerCase()}`;
+        if (!rulingMap.has(rulingKey)) {
+          rulingMap.set(rulingKey, ruling);
+        }
+      }
+      mergedEntries.push({
+        ...r,
+        rulings: [...rulingMap.values()].sort((a, b) => new Date(b.date) - new Date(a.date))
+      });
+    } else {
+      mergedEntries.push({ ...r });
+    }
+  }
+  for (const r of importRulings) {
+    let expId = r.expansionId || "";
+    if (expId) {
+      const importExp = (importGame.expansions || []).find(e => e.id === expId);
+      if (importExp) {
+        const mergedExpId = expNameToId.get(importExp.name.trim().toLowerCase());
+        if (mergedExpId) expId = mergedExpId;
+      }
+    }
+    const key = `${expId}::${r.disputeText.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedEntries.push({ ...r, expansionId: expId });
+  }
+  return mergedEntries;
+}
+
+function mergeLoanRecords(localGame, importGame) {
+  const localRecords = localGame.loanRecords || [];
+  const importRecords = importGame.loanRecords || [];
+  const seen = new Set();
+  const merged = [];
+  for (const record of [...localRecords, ...importRecords]) {
+    let key;
+    if (record.id) {
+      key = record.id;
+    } else {
+      key = `${record.borrower}::${record.borrowedAt}::${record.expectedReturnAt || ""}::${record.returnedAt || ""}`;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ ...record, id: record.id || generateId() });
+  }
+  return merged.sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
+}
+
+function mergeGames(localGame, importGame) {
+  if (!localGame) {
+    return { ...importGame };
+  }
+  const mergedExpansions = mergeExpansions(localGame, importGame);
+  const merged = {
+    ...localGame,
+    minPlayers: importGame.minPlayers < localGame.minPlayers ? importGame.minPlayers : localGame.minPlayers,
+    maxPlayers: importGame.maxPlayers > localGame.maxPlayers ? importGame.maxPlayers : localGame.maxPlayers,
+    duration: importGame.duration !== localGame.duration ? importGame.duration : localGame.duration,
+    complexity: importGame.complexity !== localGame.complexity ? importGame.complexity : localGame.complexity,
+    lastPlayed: new Date(importGame.lastPlayed) > new Date(localGame.lastPlayed) ? importGame.lastPlayed : localGame.lastPlayed,
+    cover: importGame.cover && importGame.cover.length > (localGame.cover || "").length ? importGame.cover : localGame.cover,
+    forgets: mergeRuleArrays(localGame.forgets || [], importGame.forgets || []),
+    disputes: mergeRuleArrays(localGame.disputes || [], importGame.disputes || []),
+    setup: mergeRuleArrays(localGame.setup || [], importGame.setup || []),
+    scoring: mergeRuleArrays(localGame.scoring || [], importGame.scoring || []),
+    expansions: mergedExpansions,
+    disputeRulings: mergeDisputeRulings(localGame, importGame, mergedExpansions),
+    loanRecords: mergeLoanRecords(localGame, importGame)
+  };
+  const newContainers = [{ disputes: merged.disputes, expansionId: "" }];
+  for (const exp of merged.expansions || []) {
+    newContainers.push({ disputes: exp.disputes, expansionId: exp.id });
+  }
+  syncDisputeRulingsForGame(merged, null, newContainers);
+  return merged;
+}
+
+function executeImport(importItems, globalStrategy, individualStrategies) {
+  const processedGames = [];
+  const localGamesMap = new Map();
+  for (const g of state.games) {
+    localGamesMap.set(g.name.trim().toLowerCase(), g);
+  }
+  const processedNames = new Set();
+  for (const item of importItems) {
+    const strategy = individualStrategies[item.id] || globalStrategy;
+    const key = item.name.trim().toLowerCase();
+    processedNames.add(key);
+    if (item.status === IMPORT_ITEM_STATUS.SKIP) {
+      processedGames.push({ ...item.localGame });
+      continue;
+    }
+    if (item.status === IMPORT_ITEM_STATUS.NEW) {
+      processedGames.push({ ...item.importGame });
+      continue;
+    }
+    const localGame = item.localGame;
+    const importGame = item.importGame;
+    switch (strategy) {
+      case MERGE_STRATEGY.OVERWRITE:
+        processedGames.push({ ...importGame, id: localGame.id });
+        break;
+      case MERGE_STRATEGY.KEEP:
+        processedGames.push({ ...localGame });
+        break;
+      case MERGE_STRATEGY.MERGE:
+        const merged = mergeGames(localGame, importGame);
+        processedGames.push({ ...merged, id: localGame.id });
+        break;
+      default:
+        processedGames.push({ ...localGame });
+    }
+  }
+  for (const g of state.games) {
+    const key = g.name.trim().toLowerCase();
+    if (!processedNames.has(key)) {
+      processedGames.push({ ...g });
+    }
+  }
+  return processedGames;
+}
+
+function getImportStats(items) {
+  return {
+    new: items.filter(i => i.status === IMPORT_ITEM_STATUS.NEW).length,
+    overwrite: items.filter(i => i.status === IMPORT_ITEM_STATUS.OVERWRITE).length,
+    skip: items.filter(i => i.status === IMPORT_ITEM_STATUS.SKIP).length,
+    conflict: items.filter(i => i.status === IMPORT_ITEM_STATUS.CONFLICT).length
+  };
+}
+
+function renderImportPreview() {
+  const { importItems, globalStrategy, individualStrategies, filter } = importPreviewState;
+  const stats = getImportStats(importItems);
+  els.importStatNew.textContent = stats.new;
+  els.importStatOverwrite.textContent = stats.overwrite;
+  els.importStatSkip.textContent = stats.skip;
+  els.importStatConflict.textContent = stats.conflict;
+  const filteredItems = importItems.filter(item => {
+    if (filter === "all") return true;
+    if (filter === "new") return item.status === IMPORT_ITEM_STATUS.NEW;
+    if (filter === "conflict") return item.status === IMPORT_ITEM_STATUS.CONFLICT;
+    return true;
+  });
+  const statusLabels = {
+    [IMPORT_ITEM_STATUS.NEW]: { label: "新增", class: "new", icon: "➕" },
+    [IMPORT_ITEM_STATUS.OVERWRITE]: { label: "可覆盖", class: "overwrite", icon: "🔄" },
+    [IMPORT_ITEM_STATUS.SKIP]: { label: "跳过", class: "skip", icon: "⏭️" },
+    [IMPORT_ITEM_STATUS.CONFLICT]: { label: "冲突", class: "conflict", icon: "⚠️" }
+  };
+  els.importPreviewList.innerHTML = filteredItems.map(item => {
+    const status = statusLabels[item.status];
+    const currentStrategy = individualStrategies[item.id] || globalStrategy;
+    const isNewOrSkip = item.status === IMPORT_ITEM_STATUS.NEW || item.status === IMPORT_ITEM_STATUS.SKIP;
+    const diffHtml = item.differences && item.differences.length > 0 ? `
+      <div class="import-item-diffs">
+        ${item.differences.map(d => `
+          <div class="import-item-diff">
+            <span class="import-diff-field">${d.field}:</span>
+            <span class="import-diff-local">本地: ${d.local}</span>
+            <span class="import-diff-arrow">→</span>
+            <span class="import-diff-imported">导入: ${d.imported}</span>
+          </div>
+        `).join("")}
+      </div>
+    ` : "";
+    const strategyOptions = isNewOrSkip ? "" : `
+      <div class="import-item-strategy">
+        <label>
+          <input type="radio" name="strategy-${item.id}" value="${MERGE_STRATEGY.OVERWRITE}" ${currentStrategy === MERGE_STRATEGY.OVERWRITE ? "checked" : ""} data-import-item="${item.id}" />
+          <span>覆盖</span>
+        </label>
+        <label>
+          <input type="radio" name="strategy-${item.id}" value="${MERGE_STRATEGY.KEEP}" ${currentStrategy === MERGE_STRATEGY.KEEP ? "checked" : ""} data-import-item="${item.id}" />
+          <span>保留</span>
+        </label>
+        <label>
+          <input type="radio" name="strategy-${item.id}" value="${MERGE_STRATEGY.MERGE}" ${currentStrategy === MERGE_STRATEGY.MERGE ? "checked" : ""} data-import-item="${item.id}" />
+          <span>合并</span>
+        </label>
+      </div>
+    `;
+    return `
+      <div class="import-preview-item import-status-${status.class}">
+        <div class="import-item-header">
+          <div class="import-item-status-badge ${status.class}">${status.icon} ${status.label}</div>
+          <div class="import-item-name">${escapeHtml(item.name)}</div>
+        </div>
+        ${diffHtml}
+        ${strategyOptions}
+      </div>
+    `;
+  }).join("") || `<div class="import-preview-empty">没有符合筛选条件的桌游</div>`;
+  const toProcess = importItems.filter(i => {
+    if (i.status === IMPORT_ITEM_STATUS.SKIP) return false;
+    const strategy = individualStrategies[i.id] || globalStrategy;
+    return strategy !== MERGE_STRATEGY.KEEP || i.status === IMPORT_ITEM_STATUS.NEW;
+  }).length;
+  els.importPreviewSummaryText.textContent = `共 ${toProcess} 个桌游将被处理`;
+}
+
+function openImportPreview(importData, importedFilterViews, importedActiveFilterViewId) {
+  const importItems = analyzeImportData(importData);
+  importPreviewState = {
+    importItems,
+    globalStrategy: MERGE_STRATEGY.KEEP,
+    individualStrategies: {},
+    filter: "all",
+    importData,
+    importedFilterViews,
+    importedActiveFilterViewId
+  };
+  const strategyRadios = document.querySelectorAll('input[name="importGlobalStrategy"]');
+  for (const radio of strategyRadios) {
+    radio.checked = radio.value === MERGE_STRATEGY.KEEP;
+  }
+  for (const tab of els.importFilterTabs) {
+    tab.classList.toggle("active", tab.dataset.importFilter === "all");
+  }
+  renderImportPreview();
+  els.importPreviewDialog.classList.remove("hidden");
+}
+
+function closeImportPreview() {
+  els.importPreviewDialog.classList.add("hidden");
+  importPreviewState = {
+    importItems: [],
+    globalStrategy: MERGE_STRATEGY.KEEP,
+    individualStrategies: {},
+    filter: "all",
+    importData: null,
+    importedFilterViews: [],
+    importedActiveFilterViewId: ""
+  };
+}
+
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3000,82 +3555,62 @@ async function handleImportFile(file) {
     const importedActiveFilterViewId = typeof migrated.activeFilterViewId === "string"
       ? migrated.activeFilterViewId
       : "";
-    const viewCountMsg = importedFilterViews.length > 0
-      ? `，同时导入 ${importedFilterViews.length} 个筛选视图`
-      : "";
-    showConfirm(
-      "确认导入数据",
-      `即将导入 ${games.length} 个桌游${viewCountMsg}，这将覆盖当前的全部收藏数据，操作不可撤销。确定继续吗？`,
-      () => {
-        state.games = games.map((game) => {
-          const normalized = {
-            id: game.id || generateId(),
-            name: String(game.name || ""),
-            minPlayers: Math.max(1, Number(game.minPlayers) || 2),
-            maxPlayers: Math.max(1, Number(game.maxPlayers) || 4),
-            duration: Math.max(5, Number(game.duration) || 60),
-            complexity: ["轻", "中", "重"].includes(game.complexity) ? game.complexity : "中",
-            lastPlayed: normalizeLastPlayed(game.lastPlayed),
-            cover: String(game.cover || ""),
-            forgets: normalizeRuleArray(game.forgets),
-            disputes: normalizeRuleArray(game.disputes),
-            setup: normalizeRuleArray(game.setup),
-            scoring: normalizeRuleArray(game.scoring),
-            loanRecords: Array.isArray(game.loanRecords) ? game.loanRecords : [],
-            expansions: normalizeExpansionArray(game.expansions),
-            disputeRulings: normalizeDisputeRulings(game.disputeRulings)
-          };
-          if (normalized.minPlayers > normalized.maxPlayers) {
-            normalized.maxPlayers = normalized.minPlayers;
-          }
-          const newContainers = [{ disputes: normalized.disputes, expansionId: "" }];
-          for (const exp of normalized.expansions || []) {
-            newContainers.push({ disputes: exp.disputes, expansionId: exp.id });
-          }
-          syncDisputeRulingsForGame(normalized, null, newContainers);
-          return normalized;
-        });
-        state.selectedId = state.games[0]?.id || "";
-        state.selectedExpansionId = "";
-        state.filterViews = importedFilterViews;
-        state.activeFilterViewId = importedActiveFilterViewId;
-        if (state.activeFilterViewId && state.filterViews.length > 0) {
-          const activeView = state.filterViews.find((v) => v.id === state.activeFilterViewId);
-          if (activeView) {
-            applyFilterState(activeView.filterState);
-          } else {
-            state.activeFilterViewId = "";
-            applyFilterState({
-              keyword: "",
-              playerFilter: "all",
-              complexityFilter: "all",
-              sortMode: "stale",
-              filterMustReview: false,
-              listTagFilter: ""
-            });
-          }
-        } else {
-          applyFilterState({
-            keyword: "",
-            playerFilter: "all",
-            complexityFilter: "all",
-            sortMode: "stale",
-            filterMustReview: false,
-            listTagFilter: ""
-          });
-        }
-        renderAll();
-        const successMsg = importedFilterViews.length > 0
-          ? `成功导入 ${state.games.length} 个桌游数据和 ${importedFilterViews.length} 个筛选视图。`
-          : `成功导入 ${state.games.length} 个桌游数据。`;
-        showBackupMessage(successMsg, "success");
-      }
-    );
+    openImportPreview(games, importedFilterViews, importedActiveFilterViewId);
   } catch (err) {
     showBackupMessage(`导入失败：${err.message}`, "error");
   } finally {
     els.importFile.value = "";
   }
+}
+
+function confirmAndExecuteImport() {
+  const { importItems, globalStrategy, individualStrategies, importedFilterViews, importedActiveFilterViewId } = importPreviewState;
+  const processedGames = executeImport(importItems, globalStrategy, individualStrategies);
+  const newCount = importItems.filter(i => i.status === IMPORT_ITEM_STATUS.NEW).length;
+  const mergedCount = importItems.filter(i => {
+    if (i.status === IMPORT_ITEM_STATUS.NEW || i.status === IMPORT_ITEM_STATUS.SKIP) return false;
+    const strategy = individualStrategies[i.id] || globalStrategy;
+    return strategy === MERGE_STRATEGY.MERGE;
+  }).length;
+  const overwrittenCount = importItems.filter(i => {
+    if (i.status === IMPORT_ITEM_STATUS.NEW || i.status === IMPORT_ITEM_STATUS.SKIP) return false;
+    const strategy = individualStrategies[i.id] || globalStrategy;
+    return strategy === MERGE_STRATEGY.OVERWRITE;
+  }).length;
+  const skippedCount = importItems.filter(i => i.status === IMPORT_ITEM_STATUS.SKIP).length;
+  state.games = processedGames;
+  state.selectedId = state.games[0]?.id || "";
+  state.selectedExpansionId = "";
+  if (importedFilterViews.length > 0) {
+    const existingViewNames = new Set((state.filterViews || []).map(v => v.name.trim().toLowerCase()));
+    for (const view of importedFilterViews) {
+      const key = view.name.trim().toLowerCase();
+      if (!existingViewNames.has(key)) {
+        state.filterViews.push(view);
+        existingViewNames.add(key);
+      }
+    }
+    if (importedActiveFilterViewId && !state.activeFilterViewId) {
+      const activeView = state.filterViews.find((v) => v.id === importedActiveFilterViewId);
+      if (activeView) {
+        state.activeFilterViewId = importedActiveFilterViewId;
+        applyFilterState(activeView.filterState);
+      } else {
+        state.activeFilterViewId = "";
+      }
+    }
+  }
+  renderAll();
+  closeImportPreview();
+  let successMsg = `导入完成：`;
+  const parts = [];
+  if (newCount > 0) parts.push(`新增 ${newCount} 个桌游`);
+  if (mergedCount > 0) parts.push(`合并 ${mergedCount} 个桌游`);
+  if (overwrittenCount > 0) parts.push(`覆盖 ${overwrittenCount} 个桌游`);
+  if (skippedCount > 0) parts.push(`跳过 ${skippedCount} 个相同桌游`);
+  if (importedFilterViews.length > 0) parts.push(`导入 ${importedFilterViews.length} 个筛选视图`);
+  successMsg += parts.join("，") + "。";
+  showBackupMessage(successMsg, "success");
 }
 
 function resetToDefault() {
@@ -3112,6 +3647,47 @@ els.exportBtn.addEventListener("click", exportData);
 els.importBtn.addEventListener("click", () => els.importFile.click());
 els.importFile.addEventListener("change", (e) => handleImportFile(e.target.files[0]));
 els.resetBtn.addEventListener("click", resetToDefault);
+
+if (els.importPreviewCloseBtn) {
+  els.importPreviewCloseBtn.addEventListener("click", closeImportPreview);
+}
+if (els.importPreviewCancelBtn) {
+  els.importPreviewCancelBtn.addEventListener("click", closeImportPreview);
+}
+if (els.importPreviewConfirmBtn) {
+  els.importPreviewConfirmBtn.addEventListener("click", confirmAndExecuteImport);
+}
+if (els.importPreviewDialog) {
+  els.importPreviewDialog.addEventListener("click", (e) => {
+    if (e.target === els.importPreviewDialog) closeImportPreview();
+  });
+}
+
+document.addEventListener("change", (e) => {
+  const globalStrategyRadio = e.target.closest('input[name="importGlobalStrategy"]');
+  if (globalStrategyRadio) {
+    importPreviewState.globalStrategy = globalStrategyRadio.value;
+    importPreviewState.individualStrategies = {};
+    renderImportPreview();
+    return;
+  }
+  const itemStrategyRadio = e.target.closest('input[data-import-item]');
+  if (itemStrategyRadio) {
+    const itemId = itemStrategyRadio.dataset.importItem;
+    importPreviewState.individualStrategies[itemId] = itemStrategyRadio.value;
+    renderImportPreview();
+    return;
+  }
+});
+
+els.importFilterTabs.forEach(tab => {
+  tab.addEventListener("click", () => {
+    const filter = tab.dataset.importFilter;
+    importPreviewState.filter = filter;
+    els.importFilterTabs.forEach(t => t.classList.toggle("active", t === tab));
+    renderImportPreview();
+  });
+});
 
 els.checklistPlayerFilter.addEventListener("change", () => {
   state.checklistPlayerFilter = els.checklistPlayerFilter.value;
