@@ -3061,12 +3061,19 @@ function areGamesIdentical(a, b) {
     cover: b.cover ? b.cover.substring(0, 100) : ""
   };
   if (JSON.stringify(aSimple) !== JSON.stringify(bSimple)) return false;
-  const aRules = JSON.stringify([...(a.forgets || []), ...(a.disputes || []), ...(a.setup || []), ...(a.scoring || [])].map(r => r.text));
-  const bRules = JSON.stringify([...(b.forgets || []), ...(b.disputes || []), ...(b.setup || []), ...(b.scoring || [])].map(r => r.text));
+  const ruleToKey = (r) => `${r.text.toLowerCase()}::${r.status || ""}::${(r.tags || []).sort().join(",")}`;
+  const aRules = [...(a.forgets || []), ...(a.disputes || []), ...(a.setup || []), ...(a.scoring || [])].map(ruleToKey).sort().join("||");
+  const bRules = [...(b.forgets || []), ...(b.disputes || []), ...(b.setup || []), ...(b.scoring || [])].map(ruleToKey).sort().join("||");
   if (aRules !== bRules) return false;
-  const aExpNames = (a.expansions || []).map(e => e.name).sort().join(",");
-  const bExpNames = (b.expansions || []).map(e => e.name).sort().join(",");
-  if (aExpNames !== bExpNames) return false;
+  const aExp = (a.expansions || []).map(e => `${e.name.trim().toLowerCase()}::${[...(e.forgets || []), ...(e.disputes || []), ...(e.setup || []), ...(e.scoring || [])].map(ruleToKey).sort().join(",")}`).sort().join("||");
+  const bExp = (b.expansions || []).map(e => `${e.name.trim().toLowerCase()}::${[...(e.forgets || []), ...(e.disputes || []), ...(e.setup || []), ...(e.scoring || [])].map(ruleToKey).sort().join(",")}`).sort().join("||");
+  if (aExp !== bExp) return false;
+  const aLoanKeys = (a.loanRecords || []).map(l => `${l.borrower}::${l.borrowedAt}::${l.expectedReturnAt || ""}::${l.returnedAt || ""}::${l.id || ""}`).sort().join("||");
+  const bLoanKeys = (b.loanRecords || []).map(l => `${l.borrower}::${l.borrowedAt}::${l.expectedReturnAt || ""}::${l.returnedAt || ""}::${l.id || ""}`).sort().join("||");
+  if (aLoanKeys !== bLoanKeys) return false;
+  const aRulingKeys = (a.disputeRulings || []).map(r => `${r.expansionId || ""}::${r.disputeText.toLowerCase()}::${(r.rulings || []).map(rr => `${rr.date}::${rr.decision.toLowerCase()}`).sort().join(",")}`).sort().join("||");
+  const bRulingKeys = (b.disputeRulings || []).map(r => `${r.expansionId || ""}::${r.disputeText.toLowerCase()}::${(r.rulings || []).map(rr => `${rr.date}::${rr.decision.toLowerCase()}`).sort().join(",")}`).sort().join("||");
+  if (aRulingKeys !== bRulingKeys) return false;
   return true;
 }
 
@@ -3095,7 +3102,26 @@ function hasConflict(localGame, importGame) {
   for (const n of localExpNames) if (!importExpNames.has(n)) { hasUniqueLocalExp = true; break; }
   for (const n of importExpNames) if (!localExpNames.has(n)) { hasUniqueImportExp = true; break; }
   if (hasUniqueLocalExp && hasUniqueImportExp) return true;
-  if (localHasLoans && importHasLoans) return true;
+  if (localHasLoans && importHasLoans) {
+    const localLoanKeys = new Set((localGame.loanRecords || []).map(l => `${l.borrower}::${l.borrowedAt}::${l.expectedReturnAt || ""}`));
+    const importLoanKeys = new Set((importGame.loanRecords || []).map(l => `${l.borrower}::${l.borrowedAt}::${l.expectedReturnAt || ""}`));
+    let hasUniqueLocalLoan = false;
+    let hasUniqueImportLoan = false;
+    for (const k of localLoanKeys) if (!importLoanKeys.has(k)) { hasUniqueLocalLoan = true; break; }
+    for (const k of importLoanKeys) if (!localLoanKeys.has(k)) { hasUniqueImportLoan = true; break; }
+    if (hasUniqueLocalLoan && hasUniqueImportLoan) return true;
+  }
+  const localRulings = localGame.disputeRulings || [];
+  const importRulings = importGame.disputeRulings || [];
+  if (localRulings.length > 0 && importRulings.length > 0) {
+    const localRulingKeys = new Set(localRulings.map(r => `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`));
+    const importRulingKeys = new Set(importRulings.map(r => `${r.expansionId || ""}::${r.disputeText.toLowerCase()}`));
+    let hasUniqueLocalRuling = false;
+    let hasUniqueImportRuling = false;
+    for (const k of localRulingKeys) if (!importRulingKeys.has(k)) { hasUniqueLocalRuling = true; break; }
+    for (const k of importRulingKeys) if (!localRulingKeys.has(k)) { hasUniqueImportRuling = true; break; }
+    if (hasUniqueLocalRuling && hasUniqueImportRuling) return true;
+  }
   if (localHasCover && importHasCover && localGame.cover !== importGame.cover) return true;
   return false;
 }
@@ -3138,6 +3164,41 @@ function detectDifferences(localGame, importGame) {
   }
   if (!!localGame.cover !== !!importGame.cover || (localGame.cover && importGame.cover && localGame.cover !== importGame.cover)) {
     diffs.push({ type: "cover", field: "封面", local: localGame.cover ? "有封面" : "无封面", imported: importGame.cover ? "有封面" : "无封面" });
+  }
+  const localRulings = localGame.disputeRulings || [];
+  const importRulings = importGame.disputeRulings || [];
+  const localRulingMap = new Map();
+  for (const r of localRulings) {
+    localRulingMap.set(`${r.expansionId || ""}::${r.disputeText.toLowerCase()}`, r);
+  }
+  const importRulingMap = new Map();
+  for (const r of importRulings) {
+    importRulingMap.set(`${r.expansionId || ""}::${r.disputeText.toLowerCase()}`, r);
+  }
+  let onlyLocalRulings = 0;
+  let onlyImportRulings = 0;
+  let hasRulingContentDiff = false;
+  for (const [key, r] of localRulingMap) {
+    if (!importRulingMap.has(key)) {
+      onlyLocalRulings++;
+    } else {
+      const importR = importRulingMap.get(key);
+      const localCount = (r.rulings || []).length;
+      const importCount = (importR.rulings || []).length;
+      if (localCount !== importCount) {
+        hasRulingContentDiff = true;
+      }
+    }
+  }
+  for (const [key] of importRulingMap) {
+    if (!localRulingMap.has(key)) {
+      onlyImportRulings++;
+    }
+  }
+  if (onlyLocalRulings > 0 || onlyImportRulings > 0 || hasRulingContentDiff) {
+    const localDesc = onlyLocalRulings > 0 ? `${onlyLocalRulings} 条本地独有` : `${localRulings.length} 条`;
+    const importDesc = onlyImportRulings > 0 ? `${onlyImportRulings} 条导入独有` : `${importRulings.length} 条`;
+    diffs.push({ type: "rulings", field: "争议裁定", local: localDesc, imported: importDesc });
   }
   return diffs;
 }
@@ -3600,6 +3661,7 @@ function confirmAndExecuteImport() {
       }
     }
   }
+  saveState();
   renderAll();
   closeImportPreview();
   let successMsg = `导入完成：`;
