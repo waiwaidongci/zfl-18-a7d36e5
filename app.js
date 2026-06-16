@@ -1,5 +1,5 @@
 const storageKey = "zfl18-boardgame-rule-cards";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const today = new Date();
 
 const REVIEW_STATUS = {
@@ -204,6 +204,34 @@ function migrateV1ToV2(parsed) {
   return result;
 }
 
+function migrateV2ToV3(parsed) {
+  const result = { ...parsed };
+  if (Array.isArray(result.games)) {
+    result.games = result.games.map((game) => {
+      if (!game || typeof game !== "object") return game;
+      const migrated = { ...game };
+      if (!Array.isArray(migrated.loanRecords)) {
+        migrated.loanRecords = [];
+      } else {
+        migrated.loanRecords = migrated.loanRecords.map((record) => {
+          if (!record || typeof record !== "object") return record;
+          return {
+            id: record.id || generateId(),
+            borrower: typeof record.borrower === "string" ? record.borrower : "",
+            borrowedAt: typeof record.borrowedAt === "string" ? record.borrowedAt : new Date().toISOString().slice(0, 10),
+            expectedReturnAt: typeof record.expectedReturnAt === "string" ? record.expectedReturnAt : "",
+            notes: typeof record.notes === "string" ? record.notes : "",
+            returnedAt: record.returnedAt || null
+          };
+        });
+      }
+      return migrated;
+    });
+  }
+  result.schemaVersion = SCHEMA_VERSION;
+  return result;
+}
+
 function runMigrations(parsed) {
   if (!parsed || typeof parsed !== "object") {
     return { schemaVersion: SCHEMA_VERSION, games: [] };
@@ -218,6 +246,9 @@ function runMigrations(parsed) {
   }
   if (currentVersion < 2) {
     migrated = migrateV1ToV2(migrated);
+  }
+  if (currentVersion < 3) {
+    migrated = migrateV2ToV3(migrated);
   }
   return migrated;
 }
@@ -371,6 +402,28 @@ const els = {
   loanHistoryTitle: document.querySelector("#loanHistoryTitle"),
   loanHistoryContent: document.querySelector("#loanHistoryContent"),
   loanHistoryCloseBtn: document.querySelector("#loanHistoryCloseBtn"),
+  loanActiveCount: document.querySelector("#loanActiveCount"),
+  loanOverdueCount: document.querySelector("#loanOverdueCount"),
+  loanActiveItem: document.querySelector("#loanActiveItem"),
+  loanOverdueItem: document.querySelector("#loanOverdueItem"),
+  loanStatsPanel: document.querySelector("#loanStatsPanel"),
+  loanStatsBorrowerCount: document.querySelector("#loanStatsBorrowerCount"),
+  loanStatActive: document.querySelector("#loanStatActive"),
+  loanStatOverdue: document.querySelector("#loanStatOverdue"),
+  loanStatTopBorrower: document.querySelector("#loanStatTopBorrower"),
+  loanStatTopBorrowerCount: document.querySelector("#loanStatTopBorrowerCount"),
+  loanStatRecentReturn: document.querySelector("#loanStatRecentReturn"),
+  loanStatRecentReturnDate: document.querySelector("#loanStatRecentReturnDate"),
+  loanBorrowersList: document.querySelector("#loanBorrowersList"),
+  borrowerDetailDialog: document.querySelector("#borrowerDetailDialog"),
+  borrowerDetailName: document.querySelector("#borrowerDetailName"),
+  borrowerDetailTotal: document.querySelector("#borrowerDetailTotal"),
+  borrowerDetailActive: document.querySelector("#borrowerDetailActive"),
+  borrowerDetailOverdue: document.querySelector("#borrowerDetailOverdue"),
+  borrowerDetailAvgDays: document.querySelector("#borrowerDetailAvgDays"),
+  borrowerDetailActiveList: document.querySelector("#borrowerDetailActiveList"),
+  borrowerDetailHistoryList: document.querySelector("#borrowerDetailHistoryList"),
+  borrowerDetailCloseBtn: document.querySelector("#borrowerDetailCloseBtn"),
   editDialog: document.querySelector("#editDialog"),
   editDialogTitle: document.querySelector("#editDialogTitle"),
   editForm: document.querySelector("#editForm"),
@@ -551,6 +604,130 @@ function getCurrentLoan(game) {
 function getSortedLoanRecords(game) {
   if (!game || !Array.isArray(game.loanRecords)) return [];
   return [...game.loanRecords].sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
+}
+
+function getAllLoanRecords() {
+  const records = [];
+  for (const game of state.games) {
+    if (!Array.isArray(game.loanRecords)) continue;
+    for (const record of game.loanRecords) {
+      records.push({
+        ...record,
+        gameId: game.id,
+        gameName: game.name
+      });
+    }
+  }
+  return records;
+}
+
+function getLoanStats() {
+  const allRecords = getAllLoanRecords();
+  const activeLoans = allRecords.filter((r) => !r.returnedAt);
+  const overdueLoans = activeLoans.filter((r) => isOverdue(r));
+  const returnedRecords = allRecords.filter((r) => r.returnedAt);
+
+  const borrowerMap = new Map();
+  for (const record of allRecords) {
+    const name = record.borrower || "未知";
+    if (!borrowerMap.has(name)) {
+      borrowerMap.set(name, {
+        name,
+        total: 0,
+        active: 0,
+        overdue: 0,
+        returned: 0,
+        totalDays: 0,
+        lastActive: null,
+        records: []
+      });
+    }
+    const borrower = borrowerMap.get(name);
+    borrower.total++;
+    borrower.records.push(record);
+    if (!record.returnedAt) {
+      borrower.active++;
+      if (isOverdue(record)) borrower.overdue++;
+      if (!borrower.lastActive || new Date(record.borrowedAt) > new Date(borrower.lastActive)) {
+        borrower.lastActive = record.borrowedAt;
+      }
+    } else {
+      borrower.returned++;
+      const days = daysBetween(record.borrowedAt, record.returnedAt);
+      borrower.totalDays += days;
+    }
+  }
+
+  const borrowers = Array.from(borrowerMap.values()).sort((a, b) => {
+    if (b.active !== a.active) return b.active - a.active;
+    if (b.overdue !== a.overdue) return b.overdue - a.overdue;
+    return b.total - a.total;
+  });
+
+  let topBorrower = null;
+  let topBorrowerCount = 0;
+  if (borrowers.length > 0) {
+    const sorted = [...borrowers].sort((a, b) => b.total - a.total);
+    topBorrower = sorted[0].name;
+    topBorrowerCount = sorted[0].total;
+  }
+
+  let recentReturn = null;
+  let recentReturnDate = null;
+  if (returnedRecords.length > 0) {
+    const sorted = [...returnedRecords].sort((a, b) => new Date(b.returnedAt) - new Date(a.returnedAt));
+    recentReturn = sorted[0].gameName;
+    recentReturnDate = sorted[0].returnedAt;
+  }
+
+  return {
+    allRecords,
+    activeLoans,
+    overdueLoans,
+    returnedRecords,
+    borrowers,
+    topBorrower,
+    topBorrowerCount,
+    recentReturn,
+    recentReturnDate
+  };
+}
+
+function getBorrowerRecords(borrowerName) {
+  const allRecords = getAllLoanRecords();
+  const filtered = allRecords.filter((r) => (r.borrower || "未知") === borrowerName);
+  const active = filtered.filter((r) => !r.returnedAt);
+  const history = filtered.filter((r) => r.returnedAt);
+  const overdue = active.filter((r) => isOverdue(r));
+  let totalDays = 0;
+  for (const r of history) {
+    totalDays += daysBetween(r.borrowedAt, r.returnedAt);
+  }
+  const avgDays = history.length > 0 ? Math.round(totalDays / history.length) : 0;
+  return {
+    name: borrowerName,
+    total: filtered.length,
+    active: active.length,
+    overdue: overdue.length,
+    avgDays,
+    activeRecords: active.sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt)),
+    historyRecords: history.sort((a, b) => new Date(b.returnedAt) - new Date(a.returnedAt))
+  };
+}
+
+function getAvatarColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % 5;
+}
+
+function getAvatarText(name) {
+  if (!name) return "?";
+  const trimmed = name.trim();
+  if (!trimmed) return "?";
+  return trimmed.slice(0, 1).toUpperCase();
 }
 
 function isValidDateString(str) {
@@ -826,6 +1003,150 @@ function renderSummary() {
   if (els.reviewPendingCount) {
     els.reviewPendingCount.textContent = getReviewPendingCount();
   }
+  const loanStats = getLoanStats();
+  if (els.loanActiveCount) {
+    els.loanActiveCount.textContent = loanStats.activeLoans.length;
+  }
+  if (els.loanOverdueCount) {
+    els.loanOverdueCount.textContent = loanStats.overdueLoans.length;
+  }
+  renderLoanStatsPanel(loanStats);
+  renderBorrowerList(loanStats);
+}
+
+function renderLoanStatsPanel(loanStats) {
+  if (!els.loanStatsPanel) return;
+  if (els.loanStatsBorrowerCount) {
+    els.loanStatsBorrowerCount.textContent = `${loanStats.borrowers.length} 位借阅人`;
+  }
+  if (els.loanStatActive) {
+    els.loanStatActive.textContent = loanStats.activeLoans.length;
+  }
+  if (els.loanStatOverdue) {
+    els.loanStatOverdue.textContent = loanStats.overdueLoans.length;
+  }
+  if (els.loanStatTopBorrower) {
+    els.loanStatTopBorrower.textContent = loanStats.topBorrower || "-";
+  }
+  if (els.loanStatTopBorrowerCount) {
+    els.loanStatTopBorrowerCount.textContent = loanStats.topBorrower
+      ? `共 ${loanStats.topBorrowerCount} 次借阅`
+      : "暂无记录";
+  }
+  if (els.loanStatRecentReturn) {
+    els.loanStatRecentReturn.textContent = loanStats.recentReturn || "-";
+  }
+  if (els.loanStatRecentReturnDate) {
+    els.loanStatRecentReturnDate.textContent = loanStats.recentReturnDate
+      ? `${formatDate(loanStats.recentReturnDate)} 归还`
+      : "暂无记录";
+  }
+}
+
+function renderBorrowerList(loanStats) {
+  if (!els.loanBorrowersList) return;
+  if (loanStats.borrowers.length === 0) {
+    els.loanBorrowersList.innerHTML = `
+      <div class="borrower-empty">
+        暂无借阅记录。从桌游详情页点击「借出桌游」开始记录吧～
+      </div>
+    `;
+    return;
+  }
+  els.loanBorrowersList.innerHTML = loanStats.borrowers
+    .map((borrower) => {
+      const badges = [];
+      if (borrower.overdue > 0) {
+        badges.push(`<span class="borrower-badge overdue">⚠️ ${borrower.overdue} 本逾期</span>`);
+      } else if (borrower.active > 0) {
+        badges.push(`<span class="borrower-badge active">📤 ${borrower.active} 本借阅中</span>`);
+      }
+      return `
+        <div class="borrower-card" data-borrower="${escapeHtml(borrower.name)}" data-color="${getAvatarColor(borrower.name)}">
+          <div class="borrower-avatar">${getAvatarText(borrower.name)}</div>
+          <div class="borrower-info">
+            <div class="borrower-name">${escapeHtml(borrower.name)}</div>
+            <div class="borrower-meta">
+              <span>累计 ${borrower.total} 次</span>
+              ${badges.join("")}
+            </div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function openBorrowerDetail(borrowerName) {
+  if (!els.borrowerDetailDialog) return;
+  const data = getBorrowerRecords(borrowerName);
+  els.borrowerDetailName.textContent = `👤 ${data.name} 的借阅详情`;
+  els.borrowerDetailTotal.textContent = data.total;
+  els.borrowerDetailActive.textContent = data.active;
+  els.borrowerDetailOverdue.textContent = data.overdue;
+  els.borrowerDetailAvgDays.textContent = `${data.avgDays} 天`;
+
+  if (data.activeRecords.length === 0) {
+    els.borrowerDetailActiveList.innerHTML = `
+      <div class="borrower-detail-empty">当前没有未归还的桌游 ✅</div>
+    `;
+  } else {
+    els.borrowerDetailActiveList.innerHTML = data.activeRecords
+      .map((record) => {
+        const overdue = isOverdue(record);
+        const borrowedDays = daysBetween(record.borrowedAt, new Date().toISOString().slice(0, 10));
+        return `
+          <div class="borrower-detail-item active ${overdue ? "overdue" : ""}" data-game-id="${record.gameId}">
+            <div class="borrower-detail-item-header">
+              <span class="borrower-detail-item-title">《${escapeHtml(record.gameName)}》</span>
+              <span class="borrower-detail-item-status ${overdue ? "overdue" : "active"}">
+                ${overdue ? `⚠️ 逾期 ${daysBetween(record.expectedReturnAt || record.borrowedAt, new Date().toISOString().slice(0, 10))} 天` : "📤 借阅中"}
+              </span>
+            </div>
+            <div class="borrower-detail-item-dates">
+              <span>借出：${formatDate(record.borrowedAt)}</span>
+              ${record.expectedReturnAt ? `<span>预计归还：${formatDate(record.expectedReturnAt)}</span>` : ""}
+              <span>已借 ${borrowedDays} 天</span>
+            </div>
+            ${record.notes ? `<div class="borrower-detail-item-notes">备注：${escapeHtml(record.notes)}</div>` : ""}
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  if (data.historyRecords.length === 0) {
+    els.borrowerDetailHistoryList.innerHTML = `
+      <div class="borrower-detail-empty">暂无历史借阅记录</div>
+    `;
+  } else {
+    els.borrowerDetailHistoryList.innerHTML = data.historyRecords
+      .map((record) => {
+        const borrowedDays = daysBetween(record.borrowedAt, record.returnedAt);
+        return `
+          <div class="borrower-detail-item" data-game-id="${record.gameId}">
+            <div class="borrower-detail-item-header">
+              <span class="borrower-detail-item-title">《${escapeHtml(record.gameName)}》</span>
+              <span class="borrower-detail-item-status returned">✅ 已归还</span>
+            </div>
+            <div class="borrower-detail-item-dates">
+              <span>借出：${formatDate(record.borrowedAt)}</span>
+              <span>归还：${formatDate(record.returnedAt)}</span>
+              <span>借阅 ${borrowedDays} 天</span>
+            </div>
+            ${record.notes ? `<div class="borrower-detail-item-notes">备注：${escapeHtml(record.notes)}</div>` : ""}
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  els.borrowerDetailDialog.classList.remove("hidden");
+}
+
+function closeBorrowerDetail() {
+  if (!els.borrowerDetailDialog) return;
+  els.borrowerDetailDialog.classList.add("hidden");
 }
 
 function renderReviewProgressBadges(game) {
@@ -2892,6 +3213,85 @@ els.loanHistoryCloseBtn.addEventListener("click", closeLoanHistoryDialog);
 els.loanHistoryDialog.addEventListener("click", (e) => {
   if (e.target === els.loanHistoryDialog) closeLoanHistoryDialog();
 });
+
+if (els.loanActiveItem) {
+  els.loanActiveItem.addEventListener("click", () => {
+    const loanStats = getLoanStats();
+    if (loanStats.activeLoans.length > 0 && els.loanStatsPanel) {
+      els.loanStatsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      showBackupMessage("当前没有借出中的桌游。", "info");
+    }
+  });
+}
+
+if (els.loanOverdueItem) {
+  els.loanOverdueItem.addEventListener("click", () => {
+    const loanStats = getLoanStats();
+    if (loanStats.overdueLoans.length > 0 && els.loanStatsPanel) {
+      els.loanStatsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const overdueBorrowers = loanStats.borrowers.filter((b) => b.overdue > 0);
+      if (overdueBorrowers.length > 0) {
+        openBorrowerDetail(overdueBorrowers[0].name);
+      }
+    } else {
+      showBackupMessage("当前没有逾期未还的桌游 🎉", "info");
+    }
+  });
+}
+
+if (els.loanBorrowersList) {
+  els.loanBorrowersList.addEventListener("click", (e) => {
+    const card = e.target.closest(".borrower-card");
+    if (!card) return;
+    const borrowerName = card.dataset.borrower;
+    if (borrowerName) {
+      openBorrowerDetail(borrowerName);
+    }
+  });
+}
+
+if (els.borrowerDetailCloseBtn) {
+  els.borrowerDetailCloseBtn.addEventListener("click", closeBorrowerDetail);
+}
+
+if (els.borrowerDetailDialog) {
+  els.borrowerDetailDialog.addEventListener("click", (e) => {
+    if (e.target === els.borrowerDetailDialog) closeBorrowerDetail();
+  });
+}
+
+if (els.borrowerDetailActiveList) {
+  els.borrowerDetailActiveList.addEventListener("click", (e) => {
+    const item = e.target.closest("[data-game-id]");
+    if (!item) return;
+    const gameId = item.dataset.gameId;
+    const game = state.games.find((g) => g.id === gameId);
+    if (game) {
+      state.selectedId = gameId;
+      state.selectedExpansionId = "";
+      closeBorrowerDetail();
+      renderAll();
+      els.detailView.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+if (els.borrowerDetailHistoryList) {
+  els.borrowerDetailHistoryList.addEventListener("click", (e) => {
+    const item = e.target.closest("[data-game-id]");
+    if (!item) return;
+    const gameId = item.dataset.gameId;
+    const game = state.games.find((g) => g.id === gameId);
+    if (game) {
+      state.selectedId = gameId;
+      state.selectedExpansionId = "";
+      closeBorrowerDetail();
+      renderAll();
+      els.detailView.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
 
 function openExpansionDialog() {
   const game = state.games.find((item) => item.id === state.selectedId);

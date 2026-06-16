@@ -30,6 +30,14 @@
             <span>仍需复习</span>
             <strong id="reviewPendingCount">0</strong>
           </div>
+          <div class="loan-summary-item on-loan" id="loanActiveItem" title="点击查看借阅详情">
+            <span>📤 借出中</span>
+            <strong id="loanActiveCount">0</strong>
+          </div>
+          <div class="loan-summary-item overdue" id="loanOverdueItem" title="点击查看逾期详情">
+            <span>⚠️ 逾期</span>
+            <strong id="loanOverdueCount">0</strong>
+          </div>
         </div>
       </header>
 
@@ -100,6 +108,89 @@
         </div>
         <div id="backupMessage" class="backup-message hidden"></div>
       </section>
+
+      <section class="loan-stats-panel panel" id="loanStatsPanel">
+        <div class="panel-head">
+          <h2>📚 借阅管理中心</h2>
+          <span id="loanStatsBorrowerCount">0 位借阅人</span>
+        </div>
+        <div class="loan-stats-grid">
+          <div class="loan-stat-card active">
+            <div class="loan-stat-icon">📤</div>
+            <div class="loan-stat-info">
+              <span class="loan-stat-label">当前借出</span>
+              <strong id="loanStatActive">0</strong>
+              <span class="loan-stat-sub">本 · 未归还</span>
+            </div>
+          </div>
+          <div class="loan-stat-card overdue">
+            <div class="loan-stat-icon">⚠️</div>
+            <div class="loan-stat-info">
+              <span class="loan-stat-label">逾期未还</span>
+              <strong id="loanStatOverdue">0</strong>
+              <span class="loan-stat-sub">本 · 需提醒</span>
+            </div>
+          </div>
+          <div class="loan-stat-card frequent">
+            <div class="loan-stat-icon">⭐</div>
+            <div class="loan-stat-info">
+              <span class="loan-stat-label">常借人</span>
+              <strong id="loanStatTopBorrower">-</strong>
+              <span class="loan-stat-sub" id="loanStatTopBorrowerCount">共 0 次借阅</span>
+            </div>
+          </div>
+          <div class="loan-stat-card recent">
+            <div class="loan-stat-icon">↩️</div>
+            <div class="loan-stat-info">
+              <span class="loan-stat-label">最近归还</span>
+              <strong id="loanStatRecentReturn">-</strong>
+              <span class="loan-stat-sub" id="loanStatRecentReturnDate">-</span>
+            </div>
+          </div>
+        </div>
+        <div class="loan-borrowers-section">
+          <div class="panel-subhead">
+            <h3>👥 借阅人列表</h3>
+            <span>点击查看借阅详情</span>
+          </div>
+          <div id="loanBorrowersList" class="loan-borrowers-list"></div>
+        </div>
+      </section>
+
+      <div id="borrowerDetailDialog" class="dialog-overlay hidden">
+        <div class="dialog borrower-detail-dialog">
+          <h3 id="borrowerDetailName">借阅人详情</h3>
+          <div class="borrower-detail-stats">
+            <div class="borrower-stat">
+              <span>累计借阅</span>
+              <strong id="borrowerDetailTotal">0</strong>
+            </div>
+            <div class="borrower-stat active">
+              <span>当前未还</span>
+              <strong id="borrowerDetailActive">0</strong>
+            </div>
+            <div class="borrower-stat overdue">
+              <span>逾期中</span>
+              <strong id="borrowerDetailOverdue">0</strong>
+            </div>
+            <div class="borrower-stat">
+              <span>平均借阅</span>
+              <strong id="borrowerDetailAvgDays">0</strong>
+            </div>
+          </div>
+          <div class="borrower-detail-section">
+            <h4>🔴 未归还桌游</h4>
+            <div id="borrowerDetailActiveList" class="borrower-detail-list"></div>
+          </div>
+          <div class="borrower-detail-section">
+            <h4>📋 历史借阅记录</h4>
+            <div id="borrowerDetailHistoryList" class="borrower-detail-list"></div>
+          </div>
+          <div class="dialog-actions">
+            <button id="borrowerDetailCloseBtn" type="button" class="primary">关闭</button>
+          </div>
+        </div>
+      </div>
 
       <section class="cover-gallery-panel panel">
         <div class="panel-head">
