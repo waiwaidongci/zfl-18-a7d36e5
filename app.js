@@ -169,6 +169,8 @@ const defaultState = {
   selectedChecklistIds: [],
   checklistPlayerFilter: "all",
   filterMustReview: false,
+  filterViews: [],
+  activeFilterViewId: "",
   games: [
     {
       id: crypto.randomUUID(),
@@ -338,7 +340,16 @@ const els = {
   partyRecommendations: document.querySelector("#partyRecommendations"),
   partyPreparation: document.querySelector("#partyPreparation"),
   partyBackToConfigBtn: document.querySelector("#partyBackToConfigBtn"),
-  partyResetBtn: document.querySelector("#partyResetBtn")
+  partyResetBtn: document.querySelector("#partyResetBtn"),
+  saveViewBtn: document.querySelector("#saveViewBtn"),
+  filterViewsList: document.querySelector("#filterViewsList"),
+  saveViewDialog: document.querySelector("#saveViewDialog"),
+  saveViewTitle: document.querySelector("#saveViewTitle"),
+  saveViewHint: document.querySelector("#saveViewHint"),
+  saveViewPreview: document.querySelector("#saveViewPreview"),
+  saveViewNameInput: document.querySelector("#saveViewNameInput"),
+  saveViewCancelBtn: document.querySelector("#saveViewCancelBtn"),
+  saveViewConfirmBtn: document.querySelector("#saveViewConfirmBtn")
 };
 
 function loadState() {
@@ -386,7 +397,9 @@ function loadState() {
       selectedExpansionId: migrated.selectedExpansionId || "",
       selectedChecklistIds: Array.isArray(migrated.selectedChecklistIds) ? migrated.selectedChecklistIds : [],
       checklistPlayerFilter: migrated.checklistPlayerFilter || "all",
-      filterMustReview: migrated.filterMustReview || false
+      filterMustReview: migrated.filterMustReview || false,
+      filterViews: Array.isArray(migrated.filterViews) ? migrated.filterViews : [],
+      activeFilterViewId: typeof migrated.activeFilterViewId === "string" ? migrated.activeFilterViewId : ""
     };
     if (saved !== JSON.stringify(result)) {
       localStorage.setItem(storageKey, JSON.stringify(result));
@@ -1272,12 +1285,164 @@ function renderCoverGallery() {
   els.coverGalleryGrid.innerHTML = html;
 }
 
+function getCurrentFilterState() {
+  return {
+    keyword: els.searchInput.value.trim(),
+    playerFilter: els.playerFilter.value,
+    complexityFilter: els.complexityFilter.value,
+    sortMode: els.sortMode.value,
+    filterMustReview: els.filterMustReview ? els.filterMustReview.checked : false
+  };
+}
+
+function applyFilterState(filterState) {
+  if (!filterState || typeof filterState !== "object") return;
+  els.searchInput.value = filterState.keyword || "";
+  els.playerFilter.value = filterState.playerFilter || "all";
+  els.complexityFilter.value = filterState.complexityFilter || "all";
+  els.sortMode.value = filterState.sortMode || "stale";
+  if (els.filterMustReview) {
+    els.filterMustReview.checked = !!filterState.filterMustReview;
+    state.filterMustReview = !!filterState.filterMustReview;
+  }
+}
+
+function normalizeFilterView(view) {
+  if (!view || typeof view !== "object") return null;
+  const state = view.filterState || {};
+  return {
+    id: view.id || generateId(),
+    name: String(view.name || "").trim().slice(0, 20),
+    filterState: {
+      keyword: String(state.keyword || ""),
+      playerFilter: String(state.playerFilter || "all"),
+      complexityFilter: String(state.complexityFilter || "all"),
+      sortMode: String(state.sortMode || "stale"),
+      filterMustReview: !!state.filterMustReview
+    },
+    createdAt: view.createdAt || new Date().toISOString()
+  };
+}
+
+function describeFilterState(filterState) {
+  if (!filterState) return "";
+  const parts = [];
+  if (filterState.keyword) parts.push(`搜索"${filterState.keyword}"`);
+  const playerLabels = { all: "全部人数", "2": "2人", "3": "3人", "4": "4人", "5": "5人" };
+  parts.push(playerLabels[filterState.playerFilter] || filterState.playerFilter);
+  const complexityLabels = { all: "全部复杂度", "轻": "轻", "中": "中", "重": "重" };
+  parts.push(complexityLabels[filterState.complexityFilter] || filterState.complexityFilter);
+  const sortLabels = { stale: "最近未玩排序", name: "名称排序", complexity: "复杂度排序" };
+  parts.push(sortLabels[filterState.sortMode] || filterState.sortMode);
+  if (filterState.filterMustReview) parts.push("只看必看");
+  return parts.join(" · ");
+}
+
+function renderFilterViews() {
+  const views = Array.isArray(state.filterViews) ? state.filterViews : [];
+  const activeId = state.activeFilterViewId || "";
+  const currentState = getCurrentFilterState();
+
+  if (views.length === 0) {
+    els.filterViewsList.innerHTML = `<p class="filter-views-empty">暂无保存的视图。调整筛选条件后，点击右上角"保存当前筛选为视图"。</p>`;
+    return;
+  }
+
+  els.filterViewsList.innerHTML = views
+    .map((view) => {
+      const isActive = view.id === activeId;
+      return `
+        <div class="filter-view-chip ${isActive ? "active" : ""}" data-view-id="${view.id}">
+          <button type="button" class="filter-view-apply" data-view-id="${view.id}" title="${escapeHtml(describeFilterState(view.filterState))}">
+            <span class="filter-view-name">${escapeHtml(view.name)}</span>
+            <span class="filter-view-desc">${escapeHtml(describeFilterState(view.filterState))}</span>
+          </button>
+          <button type="button" class="filter-view-delete" data-view-id="${view.id}" title="删除此视图">×</button>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function openSaveViewDialog() {
+  const currentState = getCurrentFilterState();
+  els.saveViewTitle.textContent = "保存筛选视图";
+  els.saveViewHint.textContent = "为当前筛选条件命名，方便下次快速切换。";
+  els.saveViewPreview.innerHTML = describeFilterState(currentState);
+  els.saveViewNameInput.value = "";
+  els.saveViewDialog.classList.remove("hidden");
+  setTimeout(() => els.saveViewNameInput.focus(), 50);
+}
+
+function closeSaveViewDialog() {
+  els.saveViewDialog.classList.add("hidden");
+}
+
+function saveCurrentFilterView() {
+  const name = els.saveViewNameInput.value.trim();
+  if (!name) {
+    showBackupMessage("请输入视图名称。", "error");
+    return;
+  }
+  if (!Array.isArray(state.filterViews)) state.filterViews = [];
+  if (state.filterViews.some((v) => v.name === name)) {
+    showBackupMessage("已存在同名视图，请换一个名称。", "error");
+    return;
+  }
+  const newView = normalizeFilterView({
+    id: generateId(),
+    name,
+    filterState: getCurrentFilterState(),
+    createdAt: new Date().toISOString()
+  });
+  if (!newView) return;
+  state.filterViews.push(newView);
+  state.activeFilterViewId = newView.id;
+  closeSaveViewDialog();
+  saveState();
+  renderFilterViews();
+  renderAll();
+  showBackupMessage(`已保存视图"${name}"。`, "success");
+}
+
+function applyFilterView(viewId) {
+  if (!Array.isArray(state.filterViews)) return;
+  const view = state.filterViews.find((v) => v.id === viewId);
+  if (!view) return;
+  applyFilterState(view.filterState);
+  state.activeFilterViewId = viewId;
+  saveState();
+  renderFilterViews();
+  renderAll();
+}
+
+function deleteFilterView(viewId) {
+  if (!Array.isArray(state.filterViews)) return;
+  const view = state.filterViews.find((v) => v.id === viewId);
+  if (!view) return;
+  showConfirm(
+    "删除筛选视图",
+    `确定要删除视图"${view.name}"吗？操作不可撤销。`,
+    () => {
+      state.filterViews = state.filterViews.filter((v) => v.id !== viewId);
+      if (state.activeFilterViewId === viewId) {
+        state.activeFilterViewId = "";
+      }
+      saveState();
+      renderFilterViews();
+      renderAll();
+      showBackupMessage(`已删除视图"${view.name}"。`, "success");
+    }
+  );
+}
+
 function renderAll() {
   saveState();
   if (els.filterMustReview) {
     els.filterMustReview.checked = state.filterMustReview;
   }
   renderSummary();
+  renderFilterViews();
   renderList();
   renderDetail();
   renderCoverGallery();
@@ -1354,14 +1519,63 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-els.searchInput.addEventListener("input", renderAll);
-els.playerFilter.addEventListener("change", renderAll);
-els.complexityFilter.addEventListener("change", renderAll);
-els.sortMode.addEventListener("change", renderAll);
+els.searchInput.addEventListener("input", () => {
+  state.activeFilterViewId = "";
+  renderAll();
+});
+els.playerFilter.addEventListener("change", () => {
+  state.activeFilterViewId = "";
+  renderAll();
+});
+els.complexityFilter.addEventListener("change", () => {
+  state.activeFilterViewId = "";
+  renderAll();
+});
+els.sortMode.addEventListener("change", () => {
+  state.activeFilterViewId = "";
+  renderAll();
+});
 if (els.filterMustReview) {
   els.filterMustReview.addEventListener("change", () => {
     state.filterMustReview = els.filterMustReview.checked;
+    state.activeFilterViewId = "";
     renderAll();
+  });
+}
+if (els.saveViewBtn) {
+  els.saveViewBtn.addEventListener("click", openSaveViewDialog);
+}
+if (els.saveViewCancelBtn) {
+  els.saveViewCancelBtn.addEventListener("click", closeSaveViewDialog);
+}
+if (els.saveViewConfirmBtn) {
+  els.saveViewConfirmBtn.addEventListener("click", saveCurrentFilterView);
+}
+if (els.saveViewDialog) {
+  els.saveViewDialog.addEventListener("click", (e) => {
+    if (e.target === els.saveViewDialog) closeSaveViewDialog();
+  });
+}
+if (els.saveViewNameInput) {
+  els.saveViewNameInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveCurrentFilterView();
+    }
+  });
+}
+if (els.filterViewsList) {
+  els.filterViewsList.addEventListener("click", (e) => {
+    const applyBtn = e.target.closest(".filter-view-apply");
+    const deleteBtn = e.target.closest(".filter-view-delete");
+    if (applyBtn) {
+      applyFilterView(applyBtn.dataset.viewId);
+      return;
+    }
+    if (deleteBtn) {
+      deleteFilterView(deleteBtn.dataset.viewId);
+      return;
+    }
   });
 }
 els.gameForm.addEventListener("submit", addGame);
@@ -1509,6 +1723,17 @@ els.detailView.addEventListener("click", (event) => {
 });
 
 setDefaultDate();
+
+if (state.activeFilterViewId && state.filterViews.length > 0) {
+  const activeView = state.filterViews.find((v) => v.id === state.activeFilterViewId);
+  if (activeView) {
+    applyFilterState(activeView.filterState);
+  } else {
+    state.activeFilterViewId = "";
+    saveState();
+  }
+}
+
 renderAll();
 
 let coverGalleryReplaceGameId = "";
@@ -1622,7 +1847,9 @@ function exportData() {
     version: 1,
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    games: state.games
+    games: state.games,
+    filterViews: Array.isArray(state.filterViews) ? state.filterViews : [],
+    activeFilterViewId: state.activeFilterViewId || ""
   };
   const jsonStr = JSON.stringify(exportObj, null, 2);
   const blob = new Blob([jsonStr], { type: "application/json" });
@@ -1679,9 +1906,18 @@ async function handleImportFile(file) {
     const importData = Array.isArray(parsed) ? { games: parsed } : parsed;
     const migrated = runMigrations(importData);
     const games = validateImportData(migrated);
+    const importedFilterViews = Array.isArray(migrated.filterViews)
+      ? migrated.filterViews.map(normalizeFilterView).filter(Boolean)
+      : [];
+    const importedActiveFilterViewId = typeof migrated.activeFilterViewId === "string"
+      ? migrated.activeFilterViewId
+      : "";
+    const viewCountMsg = importedFilterViews.length > 0
+      ? `，同时导入 ${importedFilterViews.length} 个筛选视图`
+      : "";
     showConfirm(
       "确认导入数据",
-      `即将导入 ${games.length} 个桌游，这将覆盖当前的全部收藏数据，操作不可撤销。确定继续吗？`,
+      `即将导入 ${games.length} 个桌游${viewCountMsg}，这将覆盖当前的全部收藏数据，操作不可撤销。确定继续吗？`,
       () => {
         state.games = games.map((game) => {
           const normalized = {
@@ -1713,8 +1949,21 @@ async function handleImportFile(file) {
         });
         state.selectedId = state.games[0]?.id || "";
         state.selectedExpansionId = "";
+        state.filterViews = importedFilterViews;
+        state.activeFilterViewId = importedActiveFilterViewId;
+        if (state.activeFilterViewId && state.filterViews.length > 0) {
+          const activeView = state.filterViews.find((v) => v.id === state.activeFilterViewId);
+          if (activeView) {
+            applyFilterState(activeView.filterState);
+          } else {
+            state.activeFilterViewId = "";
+          }
+        }
         renderAll();
-        showBackupMessage(`成功导入 ${state.games.length} 个桌游数据。`, "success");
+        const successMsg = importedFilterViews.length > 0
+          ? `成功导入 ${state.games.length} 个桌游数据和 ${importedFilterViews.length} 个筛选视图。`
+          : `成功导入 ${state.games.length} 个桌游数据。`;
+        showBackupMessage(successMsg, "success");
       }
     );
   } catch (err) {
@@ -1733,6 +1982,15 @@ function resetToDefault() {
       state.games = fresh.games;
       state.selectedId = state.games[0]?.id || "";
       state.selectedExpansionId = "";
+      state.filterViews = fresh.filterViews;
+      state.activeFilterViewId = "";
+      if (els.searchInput) els.searchInput.value = "";
+      if (els.playerFilter) els.playerFilter.value = "all";
+      if (els.complexityFilter) els.complexityFilter.value = "all";
+      if (els.sortMode) els.sortMode.value = "stale";
+      if (els.filterMustReview) els.filterMustReview.checked = false;
+      state.filterMustReview = false;
+      saveState();
       renderAll();
       showBackupMessage("已恢复默认示例数据。", "success");
     }

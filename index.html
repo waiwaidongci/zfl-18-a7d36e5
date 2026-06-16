@@ -71,6 +71,14 @@
         </label>
       </section>
 
+      <section class="filter-views">
+        <div class="filter-views-header">
+          <span class="filter-views-label">📌 常用筛选视图</span>
+          <button id="saveViewBtn" type="button" class="filter-views-save">💾 保存当前筛选为视图</button>
+        </div>
+        <div id="filterViewsList" class="filter-views-list"></div>
+      </section>
+
       <section class="backup-panel">
         <h2>数据备份与恢复</h2>
         <div class="backup-actions">
@@ -213,6 +221,22 @@
           <div class="dialog-actions">
             <button id="confirmCancel" type="button">取消</button>
             <button id="confirmOk" type="button" class="primary">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="saveViewDialog" class="dialog-overlay hidden">
+        <div class="dialog save-view-dialog">
+          <h3 id="saveViewTitle">保存筛选视图</h3>
+          <p id="saveViewHint">为当前筛选条件命名，方便下次快速切换。</p>
+          <div id="saveViewPreview" class="save-view-preview"></div>
+          <label>
+            视图名称
+            <input id="saveViewNameInput" type="text" placeholder="例如：周末轻策、下次必看、4人聚会" maxlength="20" required />
+          </label>
+          <div class="dialog-actions">
+            <button id="saveViewCancelBtn" type="button">取消</button>
+            <button id="saveViewConfirmBtn" type="button" class="primary">保存视图</button>
           </div>
         </div>
       </div>

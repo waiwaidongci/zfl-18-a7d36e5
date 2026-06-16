@@ -407,6 +407,135 @@ label {
   }
 }
 
+.filter-views {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(251, 251, 248, 0.94);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.filter-views-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.filter-views-label {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.filter-views-save {
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--blue);
+  color: white;
+  border-color: var(--blue);
+}
+
+.filter-views-save:hover {
+  background: #264d6e;
+  border-color: #264d6e;
+}
+
+.filter-views-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-view-chip {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+
+.filter-view-chip:hover {
+  border-color: var(--blue);
+}
+
+.filter-view-chip.active {
+  border-color: var(--blue);
+  background: rgba(49, 95, 134, 0.08);
+}
+
+.filter-view-apply {
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  display: grid;
+  gap: 2px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.filter-view-apply:hover {
+  background: rgba(49, 95, 134, 0.06);
+}
+
+.filter-view-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.filter-view-desc {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.3;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-view-delete {
+  border: none;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 0 10px;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+.filter-view-delete:hover {
+  background: rgba(179, 72, 72, 0.1);
+  color: var(--red);
+}
+
+.filter-views-empty {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+  padding: 8px 4px;
+}
+
+.save-view-preview {
+  background: rgba(49, 95, 134, 0.08);
+  border: 1px dashed rgba(49, 95, 134, 0.3);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
 .backup-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
