@@ -15,6 +15,42 @@ const REVIEW_STATUS_LABELS = {
   [REVIEW_STATUS.MUST_REVIEW]: "下次必看"
 };
 
+const REVIEW_SESSION_KEY = storageKey + "-review-session";
+
+const REVIEW_SESSION_SOURCE = {
+  MUST_REVIEW: "must_review",
+  STILL_FORGET: "still_forget",
+  UNRESOLVED_DISPUTES: "unresolved_disputes",
+  CHECKLIST: "checklist",
+  PARTY: "party",
+  ALL_PENDING: "all_pending"
+};
+
+const REVIEW_SESSION_SOURCE_LABELS = {
+  [REVIEW_SESSION_SOURCE.MUST_REVIEW]: "🔔 下次必看复习",
+  [REVIEW_SESSION_SOURCE.STILL_FORGET]: "💭 还会忘复习",
+  [REVIEW_SESSION_SOURCE.UNRESOLVED_DISPUTES]: "⚖️ 未裁定争议复习",
+  [REVIEW_SESSION_SOURCE.CHECKLIST]: "📋 聚会清单复习",
+  [REVIEW_SESSION_SOURCE.PARTY]: "🎊 聚会准备复习",
+  [REVIEW_SESSION_SOURCE.ALL_PENDING]: "📖 全部待复习"
+};
+
+const RULE_CATEGORY_LABELS = {
+  forgets: "容易忘的规则",
+  disputes: "常见争议",
+  setup: "开局准备",
+  scoring: "计分提醒"
+};
+
+const REVIEW_MARK_ACTION = {
+  MASTERED: REVIEW_STATUS.MASTERED,
+  STILL_FORGET: REVIEW_STATUS.STILL_FORGET,
+  MUST_REVIEW: REVIEW_STATUS.MUST_REVIEW,
+  SKIP: "skip"
+};
+
+let reviewSession = null;
+
 function generateId() {
   if (crypto && crypto.randomUUID) return crypto.randomUUID();
   return "id-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
@@ -500,7 +536,13 @@ const els = {
   batchCoverConfirmBtn: document.querySelector("#batchCoverConfirmBtn"),
   batchCoverCloseBtn: document.querySelector("#batchCoverCloseBtn"),
   batchCoverResultText: document.querySelector("#batchCoverResultText"),
-  listTagFilter: document.querySelector("#listTagFilter")
+  listTagFilter: document.querySelector("#listTagFilter"),
+  reviewSessionDialog: document.querySelector("#reviewSessionDialog"),
+  reviewSessionTitle: document.querySelector("#reviewSessionTitle"),
+  reviewSessionProgress: document.querySelector("#reviewSessionProgress"),
+  reviewSessionProgressFill: document.querySelector("#reviewSessionProgressFill"),
+  reviewSessionContent: document.querySelector("#reviewSessionContent"),
+  reviewSessionCloseBtn: document.querySelector("#reviewSessionCloseBtn")
 };
 
 function ruleTags(rule) {
@@ -1254,8 +1296,54 @@ function renderLoanStatus(game) {
 function renderReviewSummary(game, expansionId = "") {
   const progress = getReviewProgress(game, expansionId);
   if (progress.total === 0) return "";
+
+  const mustReviewCount = progress.mustReview;
+  const stillForgetCount = progress.stillForget;
+  const pendingCount = progress.pending;
+
+  const unresolvedDisputes = (() => {
+    const rulings = Array.isArray(game.disputeRulings) ? game.disputeRulings : [];
+    const containers = [{ container: game, expansionId: "" }];
+    for (const exp of game.expansions || []) {
+      containers.push({ container: exp, expansionId: exp.id });
+    }
+    let count = 0;
+    for (const { container, expansionId: eid } of containers) {
+      if (expansionId && eid !== expansionId) continue;
+      if (!expansionId && eid !== "") continue;
+      const disputes = container?.disputes || [];
+      for (const dispute of disputes) {
+        const text = ruleText(dispute);
+        const entry = rulings.find((r) => r.disputeText === text && (r.expansionId || "") === eid);
+        if (!entry || entry.rulings.length === 0) count++;
+      }
+    }
+    return count;
+  })();
+
+  const resumeBanner = renderResumeBanner(null);
+
+  const actionBtns = [];
+  if (mustReviewCount > 0) {
+    actionBtns.push(`<button type="button" class="review-start-btn" data-start-review="${REVIEW_SESSION_SOURCE.MUST_REVIEW}">🔔 复习下次必看 (${mustReviewCount})</button>`);
+  }
+  if (stillForgetCount > 0) {
+    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.STILL_FORGET}">💭 复习还会忘 (${stillForgetCount})</button>`);
+  }
+  if (unresolvedDisputes > 0) {
+    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.UNRESOLVED_DISPUTES}">⚖️ 复习未裁定 (${unresolvedDisputes})</button>`);
+  }
+  if (pendingCount > 0) {
+    actionBtns.push(`<button type="button" class="review-start-btn secondary" data-start-review="${REVIEW_SESSION_SOURCE.ALL_PENDING}">📖 全部待复习 (${pendingCount})</button>`);
+  }
+
+  const actionsHtml = actionBtns.length > 0
+    ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;">${actionBtns.join("")}</div>`
+    : "";
+
   return `
     <section class="review-summary">
+      ${resumeBanner}
       <h3>📖 复习进度</h3>
       <div class="review-stats">
         <div class="review-stat">
@@ -1282,6 +1370,7 @@ function renderReviewSummary(game, expansionId = "") {
       <div class="review-progress-bar">
         <div class="review-progress-fill" style="width: ${progress.total > 0 ? (progress.mastered / progress.total) * 100 : 0}%"></div>
       </div>
+      ${actionsHtml}
     </section>
   `;
 }
@@ -1686,6 +1775,10 @@ function renderChecklist() {
 
   els.checklistView.innerHTML = `
     <h3>📋 今晚聚会复习清单 · ${selectedGames.length} 个游戏</h3>
+    ${renderResumeBanner(null)}
+    <div style="margin-bottom:16px;">
+      <button type="button" class="review-start-btn" data-start-review="${REVIEW_SESSION_SOURCE.CHECKLIST}">🎴 开始卡片复习</button>
+    </div>
     ${sectionsHtml}
   `;
   els.checklistView.classList.remove("hidden");
@@ -4713,6 +4806,10 @@ function renderSplitTablePreparation(plans) {
 
   els.partyPreparation.innerHTML = `
     <h4>📋 分桌复习清单（首推方案 · 共 ${topPlan.tables.length} 桌）</h4>
+    ${renderResumeBanner(null)}
+    <div style="margin:12px 0 16px;">
+      <button type="button" class="review-start-btn" data-start-review="${REVIEW_SESSION_SOURCE.PARTY}">🎴 开始卡片复习</button>
+    </div>
     <p class="party-hint">以下为推荐方案的每桌复习重点，可根据实际人员调整灵活变动。</p>
     ${html}
   `;
@@ -4788,6 +4885,10 @@ function renderPartyPreparation(result) {
 
   els.partyPreparation.innerHTML = `
     <h4>📋 开局准备与复习清单（前 ${relevantGames.length} 个推荐游戏）</h4>
+    ${renderResumeBanner(null)}
+    <div style="margin:12px 0 16px;">
+      <button type="button" class="review-start-btn" data-start-review="${REVIEW_SESSION_SOURCE.PARTY}">🎴 开始卡片复习</button>
+    </div>
     ${html}
   `;
 }
@@ -4994,3 +5095,517 @@ els.partyResultView?.addEventListener("click", (e) => {
 });
 
 updatePartyStatusLabel("未启动");
+
+function collectRulesWithMeta(filterFn, sourceLabel) {
+  const collected = [];
+  for (const game of state.games) {
+    const containers = [{ container: game, expansionId: "", expansionName: "" }];
+    for (const exp of game.expansions || []) {
+      containers.push({ container: exp, expansionId: exp.id, expansionName: exp.name });
+    }
+    for (const { container, expansionId, expansionName } of containers) {
+      const ruleKeys = ["forgets", "disputes", "setup", "scoring"];
+      for (const ruleKey of ruleKeys) {
+        const rules = container[ruleKey] || [];
+        for (let idx = 0; idx < rules.length; idx++) {
+          const rule = rules[idx];
+          if (filterFn && !filterFn(rule, ruleKey, game, container, expansionId)) continue;
+          collected.push({
+            ruleId: rule.id || `${game.id}-${expansionId}-${ruleKey}-${idx}`,
+            gameId: game.id,
+            gameName: game.name,
+            expansionId,
+            expansionName,
+            ruleKey,
+            ruleIndex: idx,
+            text: ruleText(rule),
+            tags: ruleTags(rule),
+            prevStatus: ruleStatus(rule),
+            sourceLabel: sourceLabel || ""
+          });
+        }
+      }
+    }
+  }
+  return collected;
+}
+
+function collectMustReviewRules() {
+  return collectRulesWithMeta(
+    (rule) => ruleStatus(rule) === REVIEW_STATUS.MUST_REVIEW,
+    "下次必看"
+  );
+}
+
+function collectStillForgetRules() {
+  return collectRulesWithMeta(
+    (rule) => ruleStatus(rule) === REVIEW_STATUS.STILL_FORGET,
+    "还会忘"
+  );
+}
+
+function collectUnresolvedDisputeRules() {
+  return collectRulesWithMeta(
+    (rule, ruleKey, game, container, expansionId) => {
+      if (ruleKey !== "disputes") return false;
+      const rulings = Array.isArray(game.disputeRulings) ? game.disputeRulings : [];
+      const expId = expansionId || "";
+      const text = ruleText(rule);
+      const entry = rulings.find((r) => r.disputeText === text && (r.expansionId || "") === expId);
+      return !entry || entry.rulings.length === 0;
+    },
+    "未裁定争议"
+  );
+}
+
+function collectChecklistRules() {
+  syncChecklistSelection();
+  const selectedGameIds = new Set(state.selectedChecklistIds);
+  const selectedExpansionIdsByGame = state.selectedChecklistExpansionIds || {};
+  return collectRulesWithMeta(
+    (rule, ruleKey, game, container, expansionId) => {
+      if (!selectedGameIds.has(game.id)) return false;
+      if (expansionId) {
+        const allowed = selectedExpansionIdsByGame[game.id] || [];
+        if (!allowed.includes(expansionId)) return false;
+      }
+      return true;
+    },
+    "聚会清单"
+  );
+}
+
+function collectPartyRules() {
+  if (!partyState || !partyState.candidateIds || partyState.candidateIds.length === 0) {
+    return [];
+  }
+  const candidateIds = new Set(partyState.candidateIds);
+  return collectRulesWithMeta(
+    (rule, ruleKey, game) => candidateIds.has(game.id),
+    "聚会准备"
+  );
+}
+
+function collectAllPendingRules() {
+  return collectRulesWithMeta(
+    (rule) => {
+      const s = ruleStatus(rule);
+      return s === REVIEW_STATUS.UNMARKED || s === REVIEW_STATUS.STILL_FORGET || s === REVIEW_STATUS.MUST_REVIEW;
+    },
+    "待复习"
+  );
+}
+
+function collectRulesBySource(source, extraData) {
+  switch (source) {
+    case REVIEW_SESSION_SOURCE.MUST_REVIEW:
+      return collectMustReviewRules();
+    case REVIEW_SESSION_SOURCE.STILL_FORGET:
+      return collectStillForgetRules();
+    case REVIEW_SESSION_SOURCE.UNRESOLVED_DISPUTES:
+      return collectUnresolvedDisputeRules();
+    case REVIEW_SESSION_SOURCE.CHECKLIST:
+      return collectChecklistRules();
+    case REVIEW_SESSION_SOURCE.PARTY:
+      return collectPartyRules();
+    case REVIEW_SESSION_SOURCE.ALL_PENDING:
+      return collectAllPendingRules();
+    default:
+      return [];
+  }
+}
+
+function saveReviewSession() {
+  if (!reviewSession) {
+    localStorage.removeItem(REVIEW_SESSION_KEY);
+    return;
+  }
+  try {
+    localStorage.setItem(REVIEW_SESSION_KEY, JSON.stringify(reviewSession));
+  } catch (e) {
+    console.warn("Failed to save review session:", e);
+  }
+}
+
+function loadReviewSession() {
+  try {
+    const raw = localStorage.getItem(REVIEW_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.cards)) return null;
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+function clearReviewSessionStorage() {
+  localStorage.removeItem(REVIEW_SESSION_KEY);
+}
+
+function startReviewSession(source, extraData) {
+  const cards = collectRulesBySource(source, extraData);
+  if (cards.length === 0) {
+    showBackupMessage("当前来源没有可复习的规则卡片。", "error");
+    return;
+  }
+
+  reviewSession = {
+    id: generateId(),
+    source,
+    sourceLabel: REVIEW_SESSION_SOURCE_LABELS[source] || "复习会话",
+    startedAt: new Date().toISOString(),
+    cards,
+    currentIndex: 0,
+    marks: cards.map(() => null)
+  };
+  saveReviewSession();
+  openReviewSessionDialog();
+  renderReviewSession();
+}
+
+function resumeReviewSession() {
+  const saved = loadReviewSession();
+  if (!saved) return;
+  reviewSession = saved;
+  openReviewSessionDialog();
+  renderReviewSession();
+}
+
+function openReviewSessionDialog() {
+  if (!els.reviewSessionDialog) return;
+  els.reviewSessionDialog.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closeReviewSessionDialog() {
+  if (!els.reviewSessionDialog) return;
+  els.reviewSessionDialog.classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+function exitReviewSession() {
+  if (!reviewSession) {
+    closeReviewSessionDialog();
+    return;
+  }
+  const allMarked = reviewSession.marks.every((m) => m !== null);
+  if (allMarked) {
+    reviewSession = null;
+    clearReviewSessionStorage();
+    closeReviewSessionDialog();
+    renderAll();
+    return;
+  }
+  showConfirm(
+    "退出复习会话",
+    "还有未标记的卡片，进度已保存，下次可以继续。确定要退出吗？",
+    () => {
+      saveReviewSession();
+      closeReviewSessionDialog();
+    }
+  );
+}
+
+function getSessionStats() {
+  if (!reviewSession) return null;
+  const marks = reviewSession.marks;
+  return {
+    total: marks.length,
+    mastered: marks.filter((m) => m === REVIEW_MARK_ACTION.MASTERED).length,
+    stillForget: marks.filter((m) => m === REVIEW_MARK_ACTION.STILL_FORGET).length,
+    mustReview: marks.filter((m) => m === REVIEW_MARK_ACTION.MUST_REVIEW).length,
+    skipped: marks.filter((m) => m === REVIEW_MARK_ACTION.SKIP).length,
+    done: marks.filter((m) => m !== null).length
+  };
+}
+
+function applyMarkToRule(card, mark) {
+  if (mark === REVIEW_MARK_ACTION.SKIP) return;
+  const game = state.games.find((g) => g.id === card.gameId);
+  if (!game) return;
+  const container = getRuleContainer(game, card.expansionId);
+  if (!container) return;
+  const rules = container[card.ruleKey];
+  if (!rules || card.ruleIndex < 0 || card.ruleIndex >= rules.length) return;
+  rules[card.ruleIndex].status = mark;
+}
+
+function markCurrentCard(mark) {
+  if (!reviewSession) return;
+  const idx = reviewSession.currentIndex;
+  if (idx < 0 || idx >= reviewSession.cards.length) return;
+
+  const card = reviewSession.cards[idx];
+  reviewSession.marks[idx] = mark;
+
+  applyMarkToRule(card, mark);
+  saveState();
+  saveReviewSession();
+
+  if (idx < reviewSession.cards.length - 1) {
+    reviewSession.currentIndex = idx + 1;
+    saveReviewSession();
+    renderReviewSession();
+  } else {
+    renderReviewSession();
+    setTimeout(() => finishReviewSession(), 400);
+  }
+}
+
+function goToCard(index) {
+  if (!reviewSession) return;
+  if (index < 0 || index >= reviewSession.cards.length) return;
+  reviewSession.currentIndex = index;
+  saveReviewSession();
+  renderReviewSession();
+}
+
+function finishReviewSession() {
+  if (!reviewSession) return;
+  saveState();
+  renderReviewSessionSummary();
+}
+
+function finalizeReviewSession() {
+  reviewSession = null;
+  clearReviewSessionStorage();
+  closeReviewSessionDialog();
+  renderAll();
+}
+
+function renderReviewSession() {
+  if (!reviewSession) return;
+
+  const stats = getSessionStats();
+  const total = stats.total;
+  const done = stats.done;
+  const progress = total > 0 ? (done / total) * 100 : 0;
+
+  els.reviewSessionTitle.textContent = reviewSession.sourceLabel;
+  els.reviewSessionProgress.textContent = `${Math.min(done + 1, total)} / ${total}`;
+  els.reviewSessionProgressFill.style.width = `${progress}%`;
+
+  if (done >= total) {
+    renderReviewSessionSummary();
+    return;
+  }
+
+  const idx = reviewSession.currentIndex;
+  const card = reviewSession.cards[idx];
+  const prevStatus = card.prevStatus;
+  const prevStatusHtml = prevStatus
+    ? `<span class="review-card-prev-status ${prevStatus}">原状态：${REVIEW_STATUS_LABELS[prevStatus]}</span>`
+    : `<span class="review-card-prev-status">未标记</span>`;
+
+  const expansionHtml = card.expansionName
+    ? `<span class="review-card-expansion">🧩 ${escapeHtml(card.expansionName)}</span>`
+    : "";
+
+  const statsBarHtml = `
+    <div class="review-session-stats-bar">
+      <div class="review-session-stat mastered"><strong>${stats.mastered}</strong> 已掌握</div>
+      <div class="review-session-stat still_forget"><strong>${stats.stillForget}</strong> 还会忘</div>
+      <div class="review-session-stat must_review"><strong>${stats.mustReview}</strong> 下次必看</div>
+      <div class="review-session-stat skipped"><strong>${stats.skipped}</strong> 跳过</div>
+    </div>
+  `;
+
+  els.reviewSessionContent.innerHTML = `
+    <div class="review-card">
+      <div class="review-card-meta">
+        <span class="review-card-game">🎮 ${escapeHtml(card.gameName)}</span>
+        ${expansionHtml}
+        <span class="review-card-category">${RULE_CATEGORY_LABELS[card.ruleKey] || card.ruleKey}</span>
+        ${prevStatusHtml}
+      </div>
+      ${renderTagChips(card.tags)}
+      <div class="review-card-text">${escapeHtml(card.text)}</div>
+      <div class="review-card-actions">
+        <button type="button" class="review-action-btn mastered" data-review-mark="${REVIEW_MARK_ACTION.MASTERED}">
+          <span class="icon">✅</span>
+          <span>已掌握</span>
+        </button>
+        <button type="button" class="review-action-btn still_forget" data-review-mark="${REVIEW_MARK_ACTION.STILL_FORGET}">
+          <span class="icon">💭</span>
+          <span>还会忘</span>
+        </button>
+        <button type="button" class="review-action-btn must_review" data-review-mark="${REVIEW_MARK_ACTION.MUST_REVIEW}">
+          <span class="icon">🔔</span>
+          <span>下次必看</span>
+        </button>
+        <button type="button" class="review-action-btn skip" data-review-mark="${REVIEW_MARK_ACTION.SKIP}">
+          <span class="icon">⏭️</span>
+          <span>跳过</span>
+        </button>
+      </div>
+    </div>
+    ${statsBarHtml}
+  `;
+}
+
+function renderReviewSessionSummary() {
+  if (!reviewSession) return;
+
+  const stats = getSessionStats();
+  const markedCards = reviewSession.cards
+    .map((card, idx) => ({ card, mark: reviewSession.marks[idx] }))
+    .filter((item) => item.mark !== null);
+
+  const detailsHtml = markedCards.length > 0
+    ? `
+      <div class="review-summary-details">
+        <h4>本次标记明细</h4>
+        <ul class="review-summary-list">
+          ${markedCards.map(({ card, mark }) => {
+            const markLabel = mark === REVIEW_MARK_ACTION.MASTERED ? "已掌握"
+              : mark === REVIEW_MARK_ACTION.STILL_FORGET ? "还会忘"
+              : mark === REVIEW_MARK_ACTION.MUST_REVIEW ? "下次必看"
+              : "跳过";
+            const location = card.expansionName
+              ? `${card.gameName} · ${card.expansionName}`
+              : card.gameName;
+            return `
+              <li>
+                <span class="status-tag ${mark}">${markLabel}</span>
+                <div class="item-text">
+                  ${escapeHtml(card.text)}
+                  <span class="item-game">${escapeHtml(location)} · ${RULE_CATEGORY_LABELS[card.ruleKey] || card.ruleKey}</span>
+                </div>
+              </li>
+            `;
+          }).join("")}
+        </ul>
+      </div>
+    `
+    : "";
+
+  els.reviewSessionTitle.textContent = `${reviewSession.sourceLabel} · 完成`;
+  els.reviewSessionProgress.textContent = `${stats.total} / ${stats.total}`;
+  els.reviewSessionProgressFill.style.width = "100%";
+
+  els.reviewSessionContent.innerHTML = `
+    <div class="review-summary-card">
+      <h3 class="review-summary-title">🎉 本次复习完成</h3>
+      <div class="review-summary-stats">
+        <div class="review-summary-stat mastered">
+          <span class="value">${stats.mastered}</span>
+          <span class="label">✅ 已掌握</span>
+        </div>
+        <div class="review-summary-stat still_forget">
+          <span class="value">${stats.stillForget}</span>
+          <span class="label">💭 还会忘</span>
+        </div>
+        <div class="review-summary-stat must_review">
+          <span class="value">${stats.mustReview}</span>
+          <span class="label">🔔 下次必看</span>
+        </div>
+        <div class="review-summary-stat skipped">
+          <span class="value">${stats.skipped}</span>
+          <span class="label">⏭️ 跳过</span>
+        </div>
+      </div>
+      ${detailsHtml}
+      <div class="review-summary-actions">
+        <button type="button" id="reviewFinalizeBtn" class="primary">完成并返回</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderResumeBanner(_container, title) {
+  const saved = loadReviewSession();
+  if (!saved) return "";
+  const stats = {
+    total: saved.marks.length,
+    done: saved.marks.filter((m) => m !== null).length
+  };
+  const remaining = stats.total - stats.done;
+  if (remaining <= 0) return "";
+  const titleText = title || saved.sourceLabel || "未完成的复习";
+  return `
+    <div class="resume-session-banner" data-resume-banner>
+      <div class="info">
+        ${escapeHtml(titleText)}<span>已完成 ${stats.done}/${stats.total}，还剩 ${remaining} 条</span>
+      </div>
+      <div class="actions">
+        <button type="button" class="review-start-btn" data-resume-session>继续复习</button>
+        <button type="button" class="review-start-btn secondary" data-discard-session>放弃</button>
+      </div>
+    </div>
+  `;
+}
+
+els.reviewSessionCloseBtn?.addEventListener("click", exitReviewSession);
+
+els.reviewSessionDialog?.addEventListener("click", (e) => {
+  const markBtn = e.target.closest("[data-review-mark]");
+  if (markBtn) {
+    const mark = markBtn.dataset.reviewMark;
+    if (mark) markCurrentCard(mark);
+    return;
+  }
+  const finalizeBtn = e.target.closest("#reviewFinalizeBtn");
+  if (finalizeBtn) {
+    finalizeReviewSession();
+    return;
+  }
+  if (e.target === els.reviewSessionDialog) {
+    exitReviewSession();
+  }
+});
+
+document.addEventListener("click", (e) => {
+  const startBtn = e.target.closest("[data-start-review]");
+  if (startBtn) {
+    const source = startBtn.dataset.startReview;
+    if (source) startReviewSession(source);
+    return;
+  }
+  const resumeBtn = e.target.closest("[data-resume-session]");
+  if (resumeBtn) {
+    resumeReviewSession();
+    return;
+  }
+  const discardBtn = e.target.closest("[data-discard-session]");
+  if (discardBtn) {
+    showConfirm(
+      "放弃未完成复习",
+      "确定要放弃当前未完成的复习会话吗？已标记的规则状态会保留。",
+      () => {
+        reviewSession = null;
+        clearReviewSessionStorage();
+        renderAll();
+      }
+    );
+    return;
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (!reviewSession || els.reviewSessionDialog?.classList.contains("hidden")) return;
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
+
+  if (e.key === "Escape") {
+    exitReviewSession();
+    return;
+  }
+  if (e.key === "1") markCurrentCard(REVIEW_MARK_ACTION.MASTERED);
+  else if (e.key === "2") markCurrentCard(REVIEW_MARK_ACTION.STILL_FORGET);
+  else if (e.key === "3") markCurrentCard(REVIEW_MARK_ACTION.MUST_REVIEW);
+  else if (e.key === "4" || e.key === "ArrowRight" || e.key === " ") {
+    e.preventDefault();
+    markCurrentCard(REVIEW_MARK_ACTION.SKIP);
+  } else if (e.key === "ArrowLeft") {
+    if (reviewSession.currentIndex > 0) goToCard(reviewSession.currentIndex - 1);
+  }
+});
+
+(function checkPendingReviewSession() {
+  const saved = loadReviewSession();
+  if (!saved) return;
+  const remaining = saved.marks.filter((m) => m === null).length;
+  if (remaining <= 0) {
+    clearReviewSessionStorage();
+  }
+})();

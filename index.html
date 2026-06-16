@@ -331,6 +331,22 @@
         </div>
       </section>
 
+      <div id="reviewSessionDialog" class="dialog-overlay review-session-overlay hidden">
+        <div class="dialog review-session-dialog">
+          <div class="review-session-header">
+            <h3 id="reviewSessionTitle">复习会话</h3>
+            <div class="review-session-progress-info">
+              <span id="reviewSessionProgress">0 / 0</span>
+              <button id="reviewSessionCloseBtn" type="button" class="review-session-close" title="退出会话">✕</button>
+            </div>
+          </div>
+          <div class="review-session-progress-bar">
+            <div id="reviewSessionProgressFill" class="review-session-progress-fill"></div>
+          </div>
+          <div id="reviewSessionContent" class="review-session-content"></div>
+        </div>
+      </div>
+
       <div id="confirmDialog" class="dialog-overlay hidden">
         <div class="dialog">
           <h3 id="confirmTitle">确认操作</h3>
