@@ -368,7 +368,19 @@ const els = {
   saveViewPreview: document.querySelector("#saveViewPreview"),
   saveViewNameInput: document.querySelector("#saveViewNameInput"),
   saveViewCancelBtn: document.querySelector("#saveViewCancelBtn"),
-  saveViewConfirmBtn: document.querySelector("#saveViewConfirmBtn")
+  saveViewConfirmBtn: document.querySelector("#saveViewConfirmBtn"),
+  batchCoverBtn: document.querySelector("#batchCoverBtn"),
+  batchCoverDialog: document.querySelector("#batchCoverDialog"),
+  batchCoverFileInput: document.querySelector("#batchCoverFileInput"),
+  batchCoverDropzone: document.querySelector("#batchCoverDropzone"),
+  batchCoverPreview: document.querySelector("#batchCoverPreview"),
+  batchCoverTotal: document.querySelector("#batchCoverTotal"),
+  batchCoverMatched: document.querySelector("#batchCoverMatched"),
+  batchCoverUnmatched: document.querySelector("#batchCoverUnmatched"),
+  batchCoverBackBtn: document.querySelector("#batchCoverBackBtn"),
+  batchCoverConfirmBtn: document.querySelector("#batchCoverConfirmBtn"),
+  batchCoverCloseBtn: document.querySelector("#batchCoverCloseBtn"),
+  batchCoverResultText: document.querySelector("#batchCoverResultText")
 };
 
 function loadState() {
@@ -1392,6 +1404,322 @@ function renderCoverGallery() {
   els.coverGalleryGrid.innerHTML = html;
 }
 
+function normalizeGameName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^\u4e00-\u9fa5a-z0-9]/g, "")
+    .trim();
+}
+
+function extractNameFromFilename(filename) {
+  const withoutExt = filename.replace(/\.[^/.]+$/, "");
+  const cleaned = withoutExt
+    .replace(/[_\-\.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/封面|cover|box|盒|包装/gi, "")
+    .trim();
+  return normalizeGameName(cleaned);
+}
+
+function matchGameByFilename(filename) {
+  const searchName = extractNameFromFilename(filename);
+  if (!searchName) return null;
+
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const game of state.games) {
+    const gameName = normalizeGameName(game.name);
+    if (!gameName) continue;
+
+    let score = 0;
+
+    if (searchName === gameName) {
+      score = 100;
+    } else if (gameName.includes(searchName) || searchName.includes(gameName)) {
+      score = 70 + Math.min(searchName.length, gameName.length) * 0.5;
+    } else {
+      let commonChars = 0;
+      const searchChars = new Set(searchName);
+      for (const ch of gameName) {
+        if (searchChars.has(ch)) commonChars++;
+      }
+      const similarity = (commonChars * 2) / (searchName.length + gameName.length);
+      if (similarity > 0.5) {
+        score = similarity * 50;
+      }
+    }
+
+    if (score > bestScore && score >= 30) {
+      bestScore = score;
+      bestMatch = game;
+    }
+  }
+
+  return bestMatch;
+}
+
+let batchCoverState = {
+  items: [],
+  processing: false
+};
+
+function showBatchCoverStep(step) {
+  document.querySelectorAll("[data-batch-step]").forEach((el) => {
+    const s = Number(el.dataset.batchStep);
+    el.classList.toggle("hidden", s !== step);
+  });
+}
+
+function openBatchCoverDialog() {
+  batchCoverState = { items: [], processing: false };
+  els.batchCoverFileInput.value = "";
+  showBatchCoverStep(1);
+  els.batchCoverDialog.classList.remove("hidden");
+}
+
+function closeBatchCoverDialog() {
+  if (!batchCoverState.processing) {
+    batchCoverState = { items: [], processing: false };
+    els.batchCoverDialog.classList.add("hidden");
+  }
+}
+
+function renderBatchCoverPreview() {
+  const matched = batchCoverState.items.filter((item) => item.matchedGame);
+  const unmatched = batchCoverState.items.filter((item) => !item.matchedGame);
+
+  els.batchCoverTotal.textContent = batchCoverState.items.length;
+  els.batchCoverMatched.textContent = matched.length;
+  els.batchCoverUnmatched.textContent = unmatched.length;
+
+  const totalNewSize = batchCoverState.items.reduce((sum, item) => sum + (item.compressResult?.compressedSize || 0), 0);
+  const totalOldSize = batchCoverState.items.reduce((sum, item) => {
+    if (item.matchedGame && item.matchedGame.cover) {
+      return sum + estimateDataUrlSize(item.matchedGame.cover);
+    }
+    return sum;
+  }, 0);
+  const currentStorage = getTotalStorageSize();
+  const projectedStorage = currentStorage.totalApprox - totalOldSize + totalNewSize;
+  const lsLimit = 5 * 1024 * 1024;
+  const usagePercent = Math.min(100, Math.round((projectedStorage / lsLimit) * 100));
+
+  let storageHtml = "";
+  if (totalNewSize > 0) {
+    storageHtml = `
+      <div class="batch-cover-storage-info">
+        <div class="batch-cover-storage-bar">
+          <div class="batch-cover-storage-fill" style="width: ${usagePercent}%"></div>
+        </div>
+        <div class="batch-cover-storage-text">
+          <span>预计存储：${formatSize(projectedStorage)}（新增 ${formatSize(totalNewSize)}${totalOldSize > 0 ? `，替换节省 ${formatSize(totalOldSize)}` : ""}）</span>
+          <span>浏览器限制约 5MB（预计 ${usagePercent}%）</span>
+        </div>
+      </div>
+    `;
+  }
+
+  let matchedHtml = "";
+  if (matched.length > 0) {
+    const matchedItemsHtml = matched
+      .map((item) => {
+        const ratio = Math.round((item.compressResult?.ratio || 0) * 100);
+        const compressInfo =
+          ratio > 10
+            ? `<span class="batch-cover-item-compress-info">压缩 ${ratio}% · ${formatSize(item.compressResult.originalSize)} → ${formatSize(item.compressResult.compressedSize)}</span>`
+            : `<span class="batch-cover-item-size">${formatSize(item.compressResult?.compressedSize || item.file.size)}</span>`;
+
+        return `
+          <div class="batch-cover-item" data-batch-item-id="${item.id}">
+            <div class="batch-cover-item-thumb">
+              <img src="${item.compressResult?.dataUrl || item.previewUrl}" alt="${escapeHtml(item.file.name)}" />
+            </div>
+            <div class="batch-cover-item-info">
+              <div class="batch-cover-item-filename">${escapeHtml(item.file.name)}</div>
+              <div class="batch-cover-item-match">
+                ✅ <span class="game-name">${escapeHtml(item.matchedGame.name)}</span>
+              </div>
+              ${compressInfo}
+            </div>
+            <button type="button" class="batch-cover-item-remove" data-batch-remove="${item.id}">移除</button>
+          </div>
+        `;
+      })
+      .join("");
+
+    matchedHtml = `
+      <div class="batch-cover-preview-section">
+        <div class="batch-cover-preview-section-header matched">
+          <div class="batch-cover-preview-section-title">
+            <span class="icon">✅</span> 匹配成功
+          </div>
+          <span class="batch-cover-preview-section-count">${matched.length} 张</span>
+        </div>
+        <div class="batch-cover-preview-grid">
+          ${matchedItemsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  let unmatchedHtml = "";
+  if (unmatched.length > 0) {
+    const availableGames = state.games
+      .filter((g) => !batchCoverState.items.some((item) => item.matchedGame?.id === g.id))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+
+    const gameOptions = availableGames
+      .map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`)
+      .join("");
+
+    const unmatchedItemsHtml = unmatched
+      .map((item) => {
+        const ratio = Math.round((item.compressResult?.ratio || 0) * 100);
+        const compressInfo =
+          ratio > 10
+            ? `<span class="batch-cover-item-compress-info">压缩 ${ratio}% · ${formatSize(item.compressResult.originalSize)} → ${formatSize(item.compressResult.compressedSize)}</span>`
+            : `<span class="batch-cover-item-size">${formatSize(item.compressResult?.compressedSize || item.file.size)}</span>`;
+
+        return `
+          <div class="batch-cover-item" data-batch-item-id="${item.id}">
+            <div class="batch-cover-item-thumb">
+              <img src="${item.compressResult?.dataUrl || item.previewUrl}" alt="${escapeHtml(item.file.name)}" />
+            </div>
+            <div class="batch-cover-item-info">
+              <div class="batch-cover-item-filename">${escapeHtml(item.file.name)}</div>
+              <div class="batch-cover-item-unmatched">
+                <label>指定目标桌游：
+                  <select data-batch-assign="${item.id}">
+                    <option value="">-- 请选择 --</option>
+                    ${gameOptions}
+                  </select>
+                </label>
+              </div>
+              ${compressInfo}
+            </div>
+            <button type="button" class="batch-cover-item-remove" data-batch-remove="${item.id}">移除</button>
+          </div>
+        `;
+      })
+      .join("");
+
+    unmatchedHtml = `
+      <div class="batch-cover-preview-section">
+        <div class="batch-cover-preview-section-header unmatched">
+          <div class="batch-cover-preview-section-title">
+            <span class="icon">⚠️</span> 待指定
+          </div>
+          <span class="batch-cover-preview-section-count">${unmatched.length} 张</span>
+        </div>
+        <div class="batch-cover-preview-grid">
+          ${unmatchedItemsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  els.batchCoverPreview.innerHTML = storageHtml + matchedHtml + unmatchedHtml;
+
+  if (batchCoverState.items.length === 0) {
+    els.batchCoverPreview.innerHTML = `<p class="checklist-empty">没有可处理的图片。</p>`;
+  }
+}
+
+async function processBatchFiles(files) {
+  const validFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+  if (validFiles.length === 0) {
+    showBackupMessage("请选择有效的图片文件。", "error");
+    return;
+  }
+
+  batchCoverState.items = [];
+  batchCoverState.processing = true;
+
+  for (const file of validFiles) {
+    const item = {
+      id: generateId(),
+      file,
+      previewUrl: "",
+      compressResult: null,
+      matchedGame: null
+    };
+
+    try {
+      item.previewUrl = await readFileAsDataUrl(file);
+      item.compressResult = await compressImage(file);
+      item.matchedGame = matchGameByFilename(file.name);
+    } catch {
+    }
+
+    batchCoverState.items.push(item);
+  }
+
+  batchCoverState.processing = false;
+  renderBatchCoverPreview();
+  showBatchCoverStep(2);
+}
+
+function removeBatchItem(itemId) {
+  batchCoverState.items = batchCoverState.items.filter((item) => item.id !== itemId);
+  renderBatchCoverPreview();
+}
+
+function assignBatchItemGame(itemId, gameId) {
+  const item = batchCoverState.items.find((i) => i.id === itemId);
+  if (!item) return;
+
+  if (gameId) {
+    const game = state.games.find((g) => g.id === gameId);
+    item.matchedGame = game || null;
+  } else {
+    item.matchedGame = null;
+  }
+
+  renderBatchCoverPreview();
+}
+
+async function confirmBatchCovers() {
+  const itemsToApply = batchCoverState.items.filter((item) => item.matchedGame && item.compressResult?.dataUrl);
+  if (itemsToApply.length === 0) {
+    showBackupMessage("没有可应用的封面，请先为图片指定目标桌游。", "error");
+    return;
+  }
+
+  batchCoverState.processing = true;
+  els.batchCoverConfirmBtn.disabled = true;
+  els.batchCoverBackBtn.disabled = true;
+
+  let updatedCount = 0;
+  let totalSaved = 0;
+
+  for (const item of itemsToApply) {
+    const game = state.games.find((g) => g.id === item.matchedGame.id);
+    if (!game) continue;
+
+    const oldSize = estimateDataUrlSize(game.cover || "");
+    game.cover = item.compressResult.dataUrl;
+    const newSize = item.compressResult.compressedSize;
+    totalSaved += Math.max(0, oldSize - newSize);
+    updatedCount++;
+  }
+
+  saveState();
+  renderAll();
+
+  batchCoverState.processing = false;
+
+  const resultText = `成功为 ${updatedCount} 个桌游设置封面${totalSaved > 0 ? `，共节省存储空间 ${formatSize(totalSaved)}` : ""}。`;
+  els.batchCoverResultText.textContent = resultText;
+  showBatchCoverStep(3);
+}
+
+function resetBatchCover() {
+  batchCoverState = { items: [], processing: false };
+  els.batchCoverFileInput.value = "";
+  showBatchCoverStep(1);
+}
+
 function getCurrentFilterState() {
   return {
     keyword: els.searchInput.value.trim(),
@@ -1916,6 +2244,80 @@ els.coverGalleryFileInput.addEventListener("change", async (e) => {
     els.coverGalleryFileInput.value = "";
   }
 });
+
+if (els.batchCoverBtn) {
+  els.batchCoverBtn.addEventListener("click", openBatchCoverDialog);
+}
+
+if (els.batchCoverDialog) {
+  els.batchCoverDialog.addEventListener("click", (e) => {
+    if (e.target === els.batchCoverDialog) closeBatchCoverDialog();
+  });
+}
+
+if (els.batchCoverFileInput) {
+  els.batchCoverFileInput.addEventListener("change", (e) => {
+    if (e.target.files.length > 0) {
+      processBatchFiles(e.target.files);
+    }
+  });
+}
+
+if (els.batchCoverDropzone) {
+  els.batchCoverDropzone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    els.batchCoverDropzone.classList.add("drag-over");
+  });
+
+  els.batchCoverDropzone.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    els.batchCoverDropzone.classList.remove("drag-over");
+  });
+
+  els.batchCoverDropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    els.batchCoverDropzone.classList.remove("drag-over");
+    if (e.dataTransfer.files.length > 0) {
+      processBatchFiles(e.dataTransfer.files);
+    }
+  });
+}
+
+if (els.batchCoverBackBtn) {
+  els.batchCoverBackBtn.addEventListener("click", resetBatchCover);
+}
+
+if (els.batchCoverConfirmBtn) {
+  els.batchCoverConfirmBtn.addEventListener("click", confirmBatchCovers);
+}
+
+if (els.batchCoverCloseBtn) {
+  els.batchCoverCloseBtn.addEventListener("click", () => {
+    closeBatchCoverDialog();
+    showBackupMessage("批量封面补全已完成。", "success");
+  });
+}
+
+if (els.batchCoverPreview) {
+  els.batchCoverPreview.addEventListener("click", (e) => {
+    const removeBtn = e.target.closest("[data-batch-remove]");
+    if (removeBtn) {
+      const itemId = removeBtn.dataset.batchRemove;
+      removeBatchItem(itemId);
+      return;
+    }
+  });
+
+  els.batchCoverPreview.addEventListener("change", (e) => {
+    const assignSelect = e.target.closest("[data-batch-assign]");
+    if (assignSelect) {
+      const itemId = assignSelect.dataset.batchAssign;
+      const gameId = assignSelect.value;
+      assignBatchItemGame(itemId, gameId);
+      return;
+    }
+  });
+}
 
 function showBackupMessage(message, type = "success") {
   els.backupMessage.textContent = message;

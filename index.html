@@ -93,7 +93,10 @@
       <section class="cover-gallery-panel panel">
         <div class="panel-head">
           <h2>🖼️ 封面图库</h2>
-          <span id="coverGalleryCount"></span>
+          <div class="cover-gallery-head-actions">
+            <button id="batchCoverBtn" type="button" class="cover-gallery-batch-btn">📦 批量补全封面</button>
+            <span id="coverGalleryCount"></span>
+          </div>
         </div>
         <div class="cover-gallery-hint">统一管理所有桌游封面，上传前自动压缩到适合本地存储的尺寸。</div>
         <div id="coverGalleryGrid" class="cover-gallery-grid"></div>
@@ -293,6 +296,50 @@
             <div class="dialog-actions">
               <button id="expansionCancelBtn" type="button">关闭</button>
               <button id="expansionAddBtn" type="button" class="primary">添加扩展包</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="batchCoverDialog" class="dialog-overlay hidden">
+        <div class="dialog batch-cover-dialog">
+          <div class="batch-cover-header">
+            <h3>📦 批量补全封面</h3>
+            <p class="batch-cover-hint">选择多张封面图片，系统会根据文件名自动匹配桌游名称。匹配成功的图片会显示预览，确认后写入封面。</p>
+          </div>
+          <div class="batch-cover-step" data-batch-step="1">
+            <div class="batch-cover-upload">
+              <label for="batchCoverFileInput" class="batch-cover-dropzone" id="batchCoverDropzone">
+                <div class="batch-cover-dropzone-icon">🖼️</div>
+                <div class="batch-cover-dropzone-text">
+                  <strong>点击选择多张图片</strong>
+                  <span>或拖拽图片到此处</span>
+                </div>
+                <span class="batch-cover-dropzone-hint">支持 JPG、PNG、WebP 格式</span>
+              </label>
+              <input id="batchCoverFileInput" type="file" accept="image/*" multiple hidden />
+            </div>
+          </div>
+          <div class="batch-cover-step hidden" data-batch-step="2">
+            <div class="batch-cover-stats">
+              <span class="batch-cover-stat"><strong id="batchCoverTotal">0</strong> 张图片</span>
+              <span class="batch-cover-stat matched"><strong id="batchCoverMatched">0</strong> 张匹配成功</span>
+              <span class="batch-cover-stat unmatched"><strong id="batchCoverUnmatched">0</strong> 张待指定</span>
+            </div>
+            <div id="batchCoverPreview" class="batch-cover-preview"></div>
+            <div class="batch-cover-actions">
+              <button id="batchCoverBackBtn" type="button">重新选择</button>
+              <button id="batchCoverConfirmBtn" type="button" class="primary">确认写入封面</button>
+            </div>
+          </div>
+          <div class="batch-cover-step hidden" data-batch-step="3">
+            <div class="batch-cover-result">
+              <div class="batch-cover-result-icon">✅</div>
+              <h4>批量封面补全完成</h4>
+              <p id="batchCoverResultText"></p>
+            </div>
+            <div class="dialog-actions">
+              <button id="batchCoverCloseBtn" type="button" class="primary">完成</button>
             </div>
           </div>
         </div>
