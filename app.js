@@ -1166,122 +1166,24 @@ function loadState() {
 }
 
 function getCurrentLoan(game) {
-  if (!game || !Array.isArray(game.loanRecords)) return null;
-  return game.loanRecords.find((record) => !record.returnedAt) || null;
+  return LoanStats.getCurrentLoanOfGame(game);
 }
 
 function getSortedLoanRecords(game) {
-  if (!game || !Array.isArray(game.loanRecords)) return [];
-  return [...game.loanRecords].sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
+  return LoanStats.getSortedRecordsOfGame(game);
 }
 
 function getAllLoanRecords() {
-  const records = [];
-  for (const game of state.games) {
-    if (!Array.isArray(game.loanRecords)) continue;
-    for (const record of game.loanRecords) {
-      records.push({
-        ...record,
-        gameId: game.id,
-        gameName: game.name
-      });
-    }
-  }
-  return records;
+  return LoanStats.collectAllRecords(state.games);
 }
 
 function getLoanStats() {
-  const allRecords = getAllLoanRecords();
-  const activeLoans = allRecords.filter((r) => !r.returnedAt);
-  const overdueLoans = activeLoans.filter((r) => isOverdue(r));
-  const returnedRecords = allRecords.filter((r) => r.returnedAt);
-
-  const borrowerMap = new Map();
-  for (const record of allRecords) {
-    const name = record.borrower || "未知";
-    if (!borrowerMap.has(name)) {
-      borrowerMap.set(name, {
-        name,
-        total: 0,
-        active: 0,
-        overdue: 0,
-        returned: 0,
-        totalDays: 0,
-        lastActive: null,
-        records: []
-      });
-    }
-    const borrower = borrowerMap.get(name);
-    borrower.total++;
-    borrower.records.push(record);
-    if (!record.returnedAt) {
-      borrower.active++;
-      if (isOverdue(record)) borrower.overdue++;
-      if (!borrower.lastActive || new Date(record.borrowedAt) > new Date(borrower.lastActive)) {
-        borrower.lastActive = record.borrowedAt;
-      }
-    } else {
-      borrower.returned++;
-      const days = daysBetween(record.borrowedAt, record.returnedAt);
-      borrower.totalDays += days;
-    }
-  }
-
-  const borrowers = Array.from(borrowerMap.values()).sort((a, b) => {
-    if (b.active !== a.active) return b.active - a.active;
-    if (b.overdue !== a.overdue) return b.overdue - a.overdue;
-    return b.total - a.total;
-  });
-
-  let topBorrower = null;
-  let topBorrowerCount = 0;
-  if (borrowers.length > 0) {
-    const sorted = [...borrowers].sort((a, b) => b.total - a.total);
-    topBorrower = sorted[0].name;
-    topBorrowerCount = sorted[0].total;
-  }
-
-  let recentReturn = null;
-  let recentReturnDate = null;
-  if (returnedRecords.length > 0) {
-    const sorted = [...returnedRecords].sort((a, b) => new Date(b.returnedAt) - new Date(a.returnedAt));
-    recentReturn = sorted[0].gameName;
-    recentReturnDate = sorted[0].returnedAt;
-  }
-
-  return {
-    allRecords,
-    activeLoans,
-    overdueLoans,
-    returnedRecords,
-    borrowers,
-    topBorrower,
-    topBorrowerCount,
-    recentReturn,
-    recentReturnDate
-  };
+  return LoanStats.computeGlobalStats(state.games);
 }
 
 function getBorrowerRecords(borrowerName) {
-  const allRecords = getAllLoanRecords();
-  const filtered = allRecords.filter((r) => (r.borrower || "未知") === borrowerName);
-  const active = filtered.filter((r) => !r.returnedAt);
-  const history = filtered.filter((r) => r.returnedAt);
-  const overdue = active.filter((r) => isOverdue(r));
-  let totalDays = 0;
-  for (const r of history) {
-    totalDays += daysBetween(r.borrowedAt, r.returnedAt);
-  }
-  const avgDays = history.length > 0 ? Math.round(totalDays / history.length) : 0;
-  return {
-    name: borrowerName,
-    total: filtered.length,
-    active: active.length,
-    overdue: overdue.length,
-    avgDays,
-    activeRecords: active.sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt)),
-    historyRecords: history.sort((a, b) => new Date(b.returnedAt) - new Date(a.returnedAt))
-  };
+  const allRecords = LoanStats.collectAllRecords(state.games);
+  return LoanStats.computeBorrowerDetail(allRecords, borrowerName);
 }
 
 function getAvatarColor(name) {
@@ -1354,6 +1256,202 @@ function isOverdue(loan) {
   if (!loan || !loan.expectedReturnAt || loan.returnedAt) return false;
   return daysBetween(loan.expectedReturnAt, new Date().toISOString().slice(0, 10)) > 0;
 }
+
+const LoanStats = (() => {
+  function _getBorrowerName(record) {
+    return record?.borrower || "未知";
+  }
+
+  function _getTodayStr() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function collectAllRecords(games) {
+    const records = [];
+    for (const game of games || []) {
+      if (!Array.isArray(game.loanRecords)) continue;
+      for (const record of game.loanRecords) {
+        records.push({
+          ...record,
+          gameId: game.id,
+          gameName: game.name
+        });
+      }
+    }
+    return records;
+  }
+
+  function getCurrentLoanOfGame(game) {
+    if (!game || !Array.isArray(game.loanRecords)) return null;
+    return game.loanRecords.find((record) => !record.returnedAt) || null;
+  }
+
+  function getSortedRecordsOfGame(game) {
+    if (!game || !Array.isArray(game.loanRecords)) return [];
+    return [...game.loanRecords].sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
+  }
+
+  function isReturned(record) {
+    return !!(record && record.returnedAt);
+  }
+
+  function isActive(record) {
+    return record && !record.returnedAt;
+  }
+
+  function checkOverdue(record) {
+    return isOverdue(record);
+  }
+
+  function getBorrowedDays(record) {
+    if (!record || !record.borrowedAt) return 0;
+    const endDate = isReturned(record) ? record.returnedAt : _getTodayStr();
+    return daysBetween(record.borrowedAt, endDate);
+  }
+
+  function getOverdueDays(record) {
+    if (!checkOverdue(record)) return 0;
+    return daysBetween(record.expectedReturnAt || record.borrowedAt, _getTodayStr());
+  }
+
+  function filterActive(records) {
+    return (records || []).filter(isActive);
+  }
+
+  function filterOverdue(records) {
+    return filterActive(records || []).filter(checkOverdue);
+  }
+
+  function filterReturned(records) {
+    return (records || []).filter(isReturned);
+  }
+
+  function sortByBorrowedAtDesc(records) {
+    return [...(records || [])].sort((a, b) => new Date(b.borrowedAt) - new Date(a.borrowedAt));
+  }
+
+  function sortByReturnedAtDesc(records) {
+    return [...(records || [])].sort((a, b) => new Date(b.returnedAt) - new Date(a.returnedAt));
+  }
+
+  function sortBorrowersForList(borrowers) {
+    return [...(borrowers || [])].sort((a, b) => {
+      if (b.active !== a.active) return b.active - a.active;
+      if (b.overdue !== a.overdue) return b.overdue - a.overdue;
+      return b.total - a.total;
+    });
+  }
+
+  function aggregateBorrowers(records) {
+    const borrowerMap = new Map();
+    for (const record of records || []) {
+      const name = _getBorrowerName(record);
+      if (!borrowerMap.has(name)) {
+        borrowerMap.set(name, {
+          name,
+          total: 0,
+          active: 0,
+          overdue: 0,
+          returned: 0,
+          totalDays: 0,
+          lastActive: null,
+          records: []
+        });
+      }
+      const borrower = borrowerMap.get(name);
+      borrower.total++;
+      borrower.records.push(record);
+      if (isActive(record)) {
+        borrower.active++;
+        if (checkOverdue(record)) borrower.overdue++;
+        if (!borrower.lastActive || new Date(record.borrowedAt) > new Date(borrower.lastActive)) {
+          borrower.lastActive = record.borrowedAt;
+        }
+      } else {
+        borrower.returned++;
+        borrower.totalDays += daysBetween(record.borrowedAt, record.returnedAt);
+      }
+    }
+    return Array.from(borrowerMap.values());
+  }
+
+  function findTopBorrower(borrowers) {
+    if (!borrowers || borrowers.length === 0) return { name: null, count: 0 };
+    const sorted = [...borrowers].sort((a, b) => b.total - a.total);
+    return { name: sorted[0].name, count: sorted[0].total };
+  }
+
+  function findRecentReturn(returnedRecords) {
+    if (!returnedRecords || returnedRecords.length === 0) return { gameName: null, date: null };
+    const sorted = sortByReturnedAtDesc(returnedRecords);
+    return { gameName: sorted[0].gameName, date: sorted[0].returnedAt };
+  }
+
+  function computeGlobalStats(games) {
+    const allRecords = collectAllRecords(games);
+    const activeLoans = filterActive(allRecords);
+    const overdueLoans = filterOverdue(allRecords);
+    const returnedRecords = filterReturned(allRecords);
+    const borrowers = sortBorrowersForList(aggregateBorrowers(allRecords));
+    const top = findTopBorrower(borrowers);
+    const recent = findRecentReturn(returnedRecords);
+
+    return {
+      allRecords,
+      activeLoans,
+      overdueLoans,
+      returnedRecords,
+      borrowers,
+      topBorrower: top.name,
+      topBorrowerCount: top.count,
+      recentReturn: recent.gameName,
+      recentReturnDate: recent.date
+    };
+  }
+
+  function computeBorrowerDetail(allRecords, borrowerName) {
+    const filtered = (allRecords || []).filter((r) => _getBorrowerName(r) === borrowerName);
+    const active = filterActive(filtered);
+    const history = filterReturned(filtered);
+    const overdue = filterOverdue(active);
+    let totalDays = 0;
+    for (const r of history) {
+      totalDays += daysBetween(r.borrowedAt, r.returnedAt);
+    }
+    const avgDays = history.length > 0 ? Math.round(totalDays / history.length) : 0;
+    return {
+      name: borrowerName,
+      total: filtered.length,
+      active: active.length,
+      overdue: overdue.length,
+      avgDays,
+      activeRecords: sortByBorrowedAtDesc(active),
+      historyRecords: sortByReturnedAtDesc(history)
+    };
+  }
+
+  return {
+    collectAllRecords,
+    getCurrentLoanOfGame,
+    getSortedRecordsOfGame,
+    isReturned,
+    isActive,
+    checkOverdue,
+    getBorrowedDays,
+    getOverdueDays,
+    filterActive,
+    filterOverdue,
+    filterReturned,
+    sortByBorrowedAtDesc,
+    sortByReturnedAtDesc,
+    sortBorrowersForList,
+    aggregateBorrowers,
+    findTopBorrower,
+    findRecentReturn,
+    computeGlobalStats,
+    computeBorrowerDetail
+  };
+})();
 
 function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
@@ -1680,14 +1778,15 @@ function openBorrowerDetail(borrowerName) {
   } else {
     els.borrowerDetailActiveList.innerHTML = data.activeRecords
       .map((record) => {
-        const overdue = isOverdue(record);
-        const borrowedDays = daysBetween(record.borrowedAt, new Date().toISOString().slice(0, 10));
+        const overdue = LoanStats.checkOverdue(record);
+        const borrowedDays = LoanStats.getBorrowedDays(record);
+        const overdueDays = LoanStats.getOverdueDays(record);
         return `
           <div class="borrower-detail-item active ${overdue ? "overdue" : ""}" data-game-id="${record.gameId}">
             <div class="borrower-detail-item-header">
               <span class="borrower-detail-item-title">《${escapeHtml(record.gameName)}》</span>
               <span class="borrower-detail-item-status ${overdue ? "overdue" : "active"}">
-                ${overdue ? `⚠️ 逾期 ${daysBetween(record.expectedReturnAt || record.borrowedAt, new Date().toISOString().slice(0, 10))} 天` : "📤 借阅中"}
+                ${overdue ? `⚠️ 逾期 ${overdueDays} 天` : "📤 借阅中"}
               </span>
             </div>
             <div class="borrower-detail-item-dates">
@@ -1709,7 +1808,7 @@ function openBorrowerDetail(borrowerName) {
   } else {
     els.borrowerDetailHistoryList.innerHTML = data.historyRecords
       .map((record) => {
-        const borrowedDays = daysBetween(record.borrowedAt, record.returnedAt);
+        const borrowedDays = LoanStats.getBorrowedDays(record);
         return `
           <div class="borrower-detail-item" data-game-id="${record.gameId}">
             <div class="borrower-detail-item-header">
@@ -1760,7 +1859,7 @@ function renderList() {
       .map((game) => {
         const selected = game.id === state.selectedId ? "selected" : "";
         const currentLoan = getCurrentLoan(game);
-        const overdue = currentLoan && isOverdue(currentLoan);
+        const overdue = currentLoan && LoanStats.checkOverdue(currentLoan);
         const loanBadge = currentLoan
           ? `<span class="loan-ribbon ${overdue ? "overdue" : ""}">
               ${overdue ? "⚠️ 逾期未还" : "📤 已借出"}
@@ -1815,8 +1914,8 @@ function renderLoanStatus(game) {
       </section>
     `;
   }
-  const overdue = isOverdue(currentLoan);
-  const borrowedDays = daysBetween(currentLoan.borrowedAt, new Date().toISOString().slice(0, 10));
+  const overdue = LoanStats.checkOverdue(currentLoan);
+  const borrowedDays = LoanStats.getBorrowedDays(currentLoan);
   return `
     <section class="loan-section">
       <h3>📚 借出状态</h3>
@@ -4744,11 +4843,9 @@ function renderLoanHistory() {
   } else {
     els.loanHistoryContent.innerHTML = records
       .map((record) => {
-        const isActive = !record.returnedAt;
-        const overdue = isActive && isOverdue(record);
-        const borrowedDays = record.returnedAt
-          ? daysBetween(record.borrowedAt, record.returnedAt)
-          : daysBetween(record.borrowedAt, new Date().toISOString().slice(0, 10));
+        const isActive = LoanStats.isActive(record);
+        const overdue = isActive && LoanStats.checkOverdue(record);
+        const borrowedDays = LoanStats.getBorrowedDays(record);
         return `
           <div class="loan-history-item ${isActive ? "active" : ""} ${overdue ? "overdue" : ""}">
             <div class="loan-history-header">
