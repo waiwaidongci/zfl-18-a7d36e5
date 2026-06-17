@@ -1,0 +1,11 @@
+{
+  "name": "zfl18-boardgame-rule-cards",
+  "version": "1.0.0",
+  "description": "桌游规则卡片管理 - 数据迁移与导入测试",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
