@@ -11,11 +11,12 @@
     "check": "npm run check:dom && npm run check:js && npm run check:css",
     "e2e": "node scripts/e2e-check.mjs",
     "lint": "npm run check && npm run test",
-    "serve": "npx serve -l 3000 ."
+    "serve": "serve -l 3000 ."
   },
   "devDependencies": {
     "acorn": "^8.14.0",
-    "playwright": "^1.52.0"
+    "playwright": "^1.52.0",
+    "serve": "^14.2.4"
   },
   "engines": {
     "node": ">=16"
