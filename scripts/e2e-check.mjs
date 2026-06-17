@@ -352,31 +352,36 @@ async function run() {
   }
 
   console.log("\n▶ 10. 编辑弹窗 — 真实打开并验证");
-  const editBtn = await page.$("#editBtn");
+  const editBtn = await page.$("#editGameBtn");
   if (editBtn) {
     const editBtnVisible = await editBtn.isVisible();
-    if (editBtnVisible) {
+    assert(editBtnVisible, "编辑按钮可见");
+    if (!editBtnVisible) {
+      assert(false, "编辑弹窗打开", "#editGameBtn 不可见");
+    } else {
       await editBtn.click();
       await page.waitForTimeout(300);
-      const editDialog = await page.$("#editDialog");
-      const editDialogOpen = editDialog
-        ? !(await editDialog.evaluate((el) => el.classList.contains("hidden")))
-        : false;
-      assert(editDialogOpen, "编辑弹窗打开");
+    }
+    const editDialog = await page.$("#editDialog");
+    const editDialogOpen = editDialog
+      ? !(await editDialog.evaluate((el) => el.classList.contains("hidden")))
+      : false;
+    assert(editDialogOpen, "编辑弹窗打开");
 
-      if (editDialogOpen) {
-        const editNameInput = await page.$("#editNameInput");
-        assert(editNameInput !== null, "编辑弹窗中名称输入框存在");
-        const editNameValue = editNameInput ? await editNameInput.inputValue() : "";
-        assert(editNameValue.length > 0, "编辑弹窗中名称输入框有值");
+    if (editDialogOpen) {
+      const editNameInput = await page.$("#editNameInput");
+      assert(editNameInput !== null, "编辑弹窗中名称输入框存在");
+      const editNameValue = editNameInput ? await editNameInput.inputValue() : "";
+      assert(editNameValue.length > 0, "编辑弹窗中名称输入框有值");
 
-        const editCancelBtn = await page.$("#editCancelBtn");
-        if (editCancelBtn) {
-          await editCancelBtn.click();
-          await page.waitForTimeout(200);
-        }
+      const editCancelBtn = await page.$("#editCancelBtn");
+      if (editCancelBtn) {
+        await editCancelBtn.click();
+        await page.waitForTimeout(200);
       }
     }
+  } else {
+    assert(false, "编辑按钮存在", "未找到 #editGameBtn");
   }
 
   console.log("\n▶ 11. 复习会话 — 真实触发并验证弹窗");
