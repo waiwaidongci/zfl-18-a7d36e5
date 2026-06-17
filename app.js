@@ -392,14 +392,29 @@ function normalizePartyArchive(archive) {
             : []
         }))
       : [],
-    recommendationSnapshot: archive.recommendationSnapshot || null,
+    recommendationSnapshot: archive.recommendationSnapshot
+      ? {
+          type: archive.recommendationSnapshot.type || "single",
+          summary: String(archive.recommendationSnapshot.summary || ""),
+          totalScore: archive.recommendationSnapshot.totalScore ? Number(archive.recommendationSnapshot.totalScore) : null
+        }
+      : null,
     finalSelections: Array.isArray(archive.finalSelections)
       ? archive.finalSelections.map((s) => ({
           gameId: String(s.gameId || ""),
           gameName: String(s.gameName || "未知桌游"),
-          expansionIds: Array.isArray(s.expansionIds) ? s.expansionIds : []
+          expansionIds: Array.isArray(s.expansionIds) ? s.expansionIds : [],
+          expansionNames: Array.isArray(s.expansionNames) ? s.expansionNames : [],
+          tableNumber: s.tableNumber ? Number(s.tableNumber) : null,
+          tablePlayerCount: s.tablePlayerCount ? Number(s.tablePlayerCount) : null,
+          tablePlayers: Array.isArray(s.tablePlayers) ? s.tablePlayers : [],
+          score: s.score !== undefined ? Number(s.score) : null,
+          reasons: Array.isArray(s.reasons) ? s.reasons : [],
+          warnings: Array.isArray(s.warnings) ? s.warnings : [],
+          planId: String(s.planId || "")
         }))
       : [],
+    selectedPlanId: String(archive.selectedPlanId || ""),
     reviewHighlights: Array.isArray(archive.reviewHighlights)
       ? archive.reviewHighlights.map((r) => ({
           gameId: String(r.gameId || ""),
@@ -434,7 +449,8 @@ function normalizePartyArchive(archive) {
           overallNotes: String(archive.actualResults.overallNotes || "")
         }
       : null,
-    sourceArchiveId: String(archive.sourceArchiveId || "")
+    sourceArchiveId: String(archive.sourceArchiveId || ""),
+    sourceArchiveName: String(archive.sourceArchiveName || "")
   };
 }
 
@@ -4104,6 +4120,10 @@ function mergeGames(localGame, importGame) {
 function executeImport(importItems, globalStrategy, individualStrategies) {
   const processedGames = [];
   const localGamesMap = new Map();
+  const idMappings = {
+    gameIdMap: {},
+    expansionIdMap: {}
+  };
   for (const g of state.games) {
     localGamesMap.set(g.name.trim().toLowerCase(), g);
   }
@@ -4118,6 +4138,10 @@ function executeImport(importItems, globalStrategy, individualStrategies) {
     }
     if (item.status === IMPORT_ITEM_STATUS.NEW) {
       processedGames.push({ ...item.importGame });
+      idMappings.gameIdMap[item.importGame.id] = item.importGame.id;
+      for (const exp of (item.importGame.expansions || [])) {
+        idMappings.expansionIdMap[exp.id] = exp.id;
+      }
       continue;
     }
     const localGame = item.localGame;
@@ -4125,16 +4149,49 @@ function executeImport(importItems, globalStrategy, individualStrategies) {
     switch (strategy) {
       case MERGE_STRATEGY.OVERWRITE:
         processedGames.push({ ...importGame, id: localGame.id });
+        idMappings.gameIdMap[importGame.id] = localGame.id;
+        for (const exp of (localGame.expansions || [])) {
+          const importExp = (importGame.expansions || []).find((ie) => ie.name.trim().toLowerCase() === exp.name.trim().toLowerCase());
+          if (importExp) {
+            idMappings.expansionIdMap[importExp.id] = exp.id;
+          }
+        }
+        for (const exp of (importGame.expansions || [])) {
+          if (!idMappings.expansionIdMap[exp.id]) {
+            idMappings.expansionIdMap[exp.id] = exp.id;
+          }
+        }
         break;
       case MERGE_STRATEGY.KEEP:
         processedGames.push({ ...localGame });
+        idMappings.gameIdMap[importGame.id] = localGame.id;
+        for (const exp of (localGame.expansions || [])) {
+          const importExp = (importGame.expansions || []).find((ie) => ie.name.trim().toLowerCase() === exp.name.trim().toLowerCase());
+          if (importExp) {
+            idMappings.expansionIdMap[importExp.id] = exp.id;
+          }
+        }
         break;
       case MERGE_STRATEGY.MERGE:
         const merged = mergeGames(localGame, importGame);
         processedGames.push({ ...merged, id: localGame.id });
+        idMappings.gameIdMap[importGame.id] = localGame.id;
+        for (const exp of (localGame.expansions || [])) {
+          const importExp = (importGame.expansions || []).find((ie) => ie.name.trim().toLowerCase() === exp.name.trim().toLowerCase());
+          if (importExp) {
+            idMappings.expansionIdMap[importExp.id] = exp.id;
+          }
+        }
+        for (const exp of (merged.expansions || [])) {
+          const importExp = (importGame.expansions || []).find((ie) => ie.name.trim().toLowerCase() === exp.name.trim().toLowerCase());
+          if (importExp && !idMappings.expansionIdMap[importExp.id]) {
+            idMappings.expansionIdMap[importExp.id] = exp.id;
+          }
+        }
         break;
       default:
         processedGames.push({ ...localGame });
+        idMappings.gameIdMap[importGame.id] = localGame.id;
     }
   }
   for (const g of state.games) {
@@ -4143,7 +4200,7 @@ function executeImport(importItems, globalStrategy, individualStrategies) {
       processedGames.push({ ...g });
     }
   }
-  return processedGames;
+  return { processedGames, idMappings };
 }
 
 function getImportStats(items) {
@@ -4227,6 +4284,8 @@ function renderImportPreview() {
 
 function openImportPreview(importData, importedFilterViews, importedActiveFilterViewId, importedPartyArchives) {
   const importItems = analyzeImportData(importData);
+  const existingArchiveKeys = new Set((state.partyArchives || []).map(a => `${a.name}::${a.createdAt}`));
+  const newArchiveCount = (importedPartyArchives || []).filter(a => !existingArchiveKeys.has(`${a.name}::${a.createdAt}`)).length;
   importPreviewState = {
     importItems,
     globalStrategy: MERGE_STRATEGY.KEEP,
@@ -4235,7 +4294,9 @@ function openImportPreview(importData, importedFilterViews, importedActiveFilter
     importData,
     importedFilterViews,
     importedActiveFilterViewId,
-    importedPartyArchives: importedPartyArchives || []
+    importedPartyArchives: importedPartyArchives || [],
+    _existingArchiveKeysBefore: existingArchiveKeys,
+    _newArchiveCount: newArchiveCount
   };
   const strategyRadios = document.querySelectorAll('input[name="importGlobalStrategy"]');
   for (const radio of strategyRadios) {
@@ -4258,7 +4319,9 @@ function closeImportPreview() {
     importData: null,
     importedFilterViews: [],
     importedActiveFilterViewId: "",
-    importedPartyArchives: []
+    importedPartyArchives: [],
+    _existingArchiveKeysBefore: new Set(),
+    _newArchiveCount: 0
   };
 }
 
@@ -4299,9 +4362,68 @@ async function handleImportFile(file) {
   }
 }
 
+function remapPartyArchiveIds(archive, idMappings) {
+  const { gameIdMap, expansionIdMap, archiveIdMap } = idMappings;
+  const remapped = structuredClone(archive);
+  if (archiveIdMap && archiveIdMap[remapped.id]) {
+    remapped.id = archiveIdMap[remapped.id];
+  }
+  for (const ref of (remapped.candidateGameRefs || [])) {
+    if (gameIdMap[ref.gameId]) {
+      ref.gameId = gameIdMap[ref.gameId];
+    }
+    for (const exp of (ref.expansions || [])) {
+      if (expansionIdMap[exp.expansionId]) {
+        exp.expansionId = expansionIdMap[exp.expansionId];
+      }
+    }
+  }
+  for (const s of (remapped.finalSelections || [])) {
+    if (gameIdMap[s.gameId]) {
+      s.gameId = gameIdMap[s.gameId];
+    }
+    s.expansionIds = (s.expansionIds || []).map((id) => expansionIdMap[id] || id);
+    if (s.tablePlayers && Array.isArray(s.tablePlayers)) {
+      for (const p of s.tablePlayers) {
+        p.id = p.id || generateId();
+      }
+    }
+  }
+  for (const h of (remapped.reviewHighlights || [])) {
+    if (gameIdMap[h.gameId]) {
+      h.gameId = gameIdMap[h.gameId];
+    }
+    if (h.expansionId && expansionIdMap[h.expansionId]) {
+      h.expansionId = expansionIdMap[h.expansionId];
+    }
+  }
+  for (const d of (remapped.disputeRulings || [])) {
+    if (gameIdMap[d.gameId]) {
+      d.gameId = gameIdMap[d.gameId];
+    }
+    if (d.expansionId && expansionIdMap[d.expansionId]) {
+      d.expansionId = expansionIdMap[d.expansionId];
+    }
+  }
+  if (remapped.actualResults && remapped.actualResults.gamesPlayed) {
+    for (const g of remapped.actualResults.gamesPlayed) {
+      if (gameIdMap[g.gameId]) {
+        g.gameId = gameIdMap[g.gameId];
+      }
+    }
+  }
+  for (const p of (remapped.players || [])) {
+    p.familiarGameIds = (p.familiarGameIds || []).map((id) => gameIdMap[id] || id);
+  }
+  if (remapped.sourceArchiveId && archiveIdMap && archiveIdMap[remapped.sourceArchiveId]) {
+    remapped.sourceArchiveId = archiveIdMap[remapped.sourceArchiveId];
+  }
+  return remapped;
+}
+
 function confirmAndExecuteImport() {
   const { importItems, globalStrategy, individualStrategies, importedFilterViews, importedActiveFilterViewId, importedPartyArchives } = importPreviewState;
-  const processedGames = executeImport(importItems, globalStrategy, individualStrategies);
+  const { processedGames, idMappings } = executeImport(importItems, globalStrategy, individualStrategies);
   const newCount = importItems.filter(i => i.status === IMPORT_ITEM_STATUS.NEW).length;
   const mergedCount = importItems.filter(i => {
     if (i.status === IMPORT_ITEM_STATUS.NEW || i.status === IMPORT_ITEM_STATUS.SKIP) return false;
@@ -4337,17 +4459,25 @@ function confirmAndExecuteImport() {
     }
   }
   if (importedPartyArchives && importedPartyArchives.length > 0) {
-    const existingArchiveNames = new Set((state.partyArchives || []).map(a => `${a.name}::${a.createdAt}`));
-    let importedArchiveCount = 0;
+    const existingArchiveKeys = new Set((state.partyArchives || []).map(a => `${a.name}::${a.createdAt}`));
+    const archiveIdMap = {};
+    const newArchives = [];
     for (const archive of importedPartyArchives) {
       const key = `${archive.name}::${archive.createdAt}`;
-      if (!existingArchiveNames.has(key)) {
-        state.partyArchives.push(archive);
-        existingArchiveNames.add(key);
-        importedArchiveCount++;
+      if (!existingArchiveKeys.has(key)) {
+        const newId = generateId();
+        archiveIdMap[archive.id] = newId;
+        newArchives.push({ ...archive, _newId: newId });
+        existingArchiveKeys.add(key);
       }
     }
-    if (importedArchiveCount > 0) {
+    const fullIdMappings = { ...idMappings, archiveIdMap };
+    for (const archive of newArchives) {
+      const remappedArchive = remapPartyArchiveIds(archive, fullIdMappings);
+      remappedArchive.id = archive._newId;
+      state.partyArchives.push(remappedArchive);
+    }
+    if (newArchives.length > 0) {
       state.partyArchives.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
   }
@@ -5753,7 +5883,9 @@ function createEmptyPartyState() {
     name: "",
     playerCount: 4,
     candidateIds: [],
-    players: []
+    players: [],
+    finalSelectionIds: [],
+    sourceArchiveId: ""
   };
 }
 
@@ -6353,9 +6485,10 @@ function generatePartyRecommendations() {
 }
 
 function renderSplitTableCard(plan, rank) {
-  const { tables, totalScore, reasons, warnings } = plan;
+  const { tables, totalScore, reasons, warnings, id } = plan;
   const isTop = rank === 0;
   const cardClass = isTop ? "recommended" : "alternative";
+  const planSelected = Array.isArray(partyState.finalSelectionIds) && partyState.finalSelectionIds.includes(`plan:${id}`);
   const badge = isTop
     ? `<span class="party-rec-badge top">⭐ 首推方案</span>`
     : `<span class="party-rec-badge alt">备选方案</span>`;
@@ -6414,9 +6547,13 @@ function renderSplitTableCard(plan, rank) {
   }).join("");
 
   return `
-    <div class="party-rec-card party-split-card ${cardClass}" data-party-plan="${plan.id}">
+    <div class="party-rec-card party-split-card ${cardClass} ${planSelected ? "final-selected" : ""}" data-party-plan="${plan.id}">
       <div class="party-rec-header">
         <div class="party-rec-title-row">
+          <label class="party-final-check">
+            <input type="checkbox" data-party-final-select-plan="${plan.id}" ${planSelected ? "checked" : ""} />
+            <span>选用此分桌方案</span>
+          </label>
           ${badge}
           <span class="party-rec-title">${tables.length}桌分桌方案</span>
         </div>
@@ -6449,6 +6586,7 @@ function renderPartyRecCard(item, rank) {
   const tagMatchHtml = tagFilter
     ? `<div class="party-rec-tag-match">${renderTagChips([tagFilter])}<span>${matchingRules.length} 条匹配规则</span></div>`
     : "";
+  const isSelected = Array.isArray(partyState.finalSelectionIds) && partyState.finalSelectionIds.includes(game.id);
 
   const reasonsHtml =
     reasons.length > 0
@@ -6461,9 +6599,13 @@ function renderPartyRecCard(item, rank) {
       : "";
 
   return `
-    <div class="party-rec-card ${cardClass}" data-party-rec-game="${game.id}">
+    <div class="party-rec-card ${cardClass} ${isSelected ? "final-selected" : ""}" data-party-rec-game="${game.id}">
       <div class="party-rec-header">
         <div class="party-rec-title-row">
+          <label class="party-final-check">
+            <input type="checkbox" data-party-final-select="${game.id}" ${isSelected ? "checked" : ""} />
+            <span>选为最终游玩</span>
+          </label>
           ${badge}
           <span class="party-rec-title">${escapeHtml(game.name)}</span>
         </div>
@@ -6875,6 +7017,38 @@ els.partyResultView?.addEventListener("click", (e) => {
   const tagFilterChip = e.target.closest("[data-tag-filter]");
   const toggleHeader = e.target.closest("[data-prep-toggle]");
   const jumpBtn = e.target.closest(".party-jump-to-detail");
+  const finalSelect = e.target.closest('[data-party-final-select]');
+  const finalSelectPlan = e.target.closest('[data-party-final-select-plan]');
+
+  if (finalSelect) {
+    const gameId = finalSelect.dataset.partyFinalSelect;
+    if (!Array.isArray(partyState.finalSelectionIds)) partyState.finalSelectionIds = [];
+    partyState.finalSelectionIds = partyState.finalSelectionIds.filter((id) => !id.startsWith("plan:"));
+    if (finalSelect.checked) {
+      if (!partyState.finalSelectionIds.includes(gameId)) partyState.finalSelectionIds.push(gameId);
+    } else {
+      partyState.finalSelectionIds = partyState.finalSelectionIds.filter((id) => id !== gameId);
+    }
+    if (partyState) {
+      const result = generatePartyRecommendations();
+      renderPartyRecommendations(result);
+    }
+    return;
+  }
+
+  if (finalSelectPlan) {
+    const planId = finalSelectPlan.dataset.partyFinalSelectPlan;
+    if (!Array.isArray(partyState.finalSelectionIds)) partyState.finalSelectionIds = [];
+    partyState.finalSelectionIds = partyState.finalSelectionIds.filter((id) => !id.startsWith("plan:"));
+    if (finalSelectPlan.checked) {
+      partyState.finalSelectionIds = [`plan:${planId}`];
+    }
+    if (partyState) {
+      const result = generatePartyRecommendations();
+      renderPartyRecommendations(result);
+    }
+    return;
+  }
 
   if (tagFilterChip) {
     state.partyTagFilter = tagFilterChip.dataset.tagFilter || "";
@@ -7443,7 +7617,7 @@ document.addEventListener("keydown", (e) => {
 let viewingArchiveId = null;
 let recordingArchiveId = null;
 
-function savePartyArchive(sourceArchiveId) {
+function savePartyArchive() {
   if (!partyState) return;
   const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
   const candidateGameRefs = candidateGames.map((g) => ({
@@ -7498,25 +7672,100 @@ function savePartyArchive(sourceArchiveId) {
   }
   const result = generatePartyRecommendations();
   const finalSelections = [];
-  if (result.type === "single" && result.recommendations) {
-    const topRecs = result.recommendations.slice(0, 3);
-    for (const rec of topRecs) {
-      finalSelections.push({
-        gameId: rec.game.id,
-        gameName: rec.game.name,
-        expansionIds: []
-      });
+  let selectedPlanId = "";
+  let selectedPlanTotalScore = null;
+  const selectedIds = partyState.finalSelectionIds || [];
+  const planSelection = selectedIds.find((id) => id.startsWith("plan:"));
+  if (planSelection) {
+    const planId = planSelection.replace("plan:", "");
+    const selectedPlan = (result.plans || []).find((p) => p.id === planId);
+    if (selectedPlan) {
+      selectedPlanId = planId;
+      selectedPlanTotalScore = selectedPlan.totalScore;
+      for (const table of selectedPlan.tables) {
+        const expNames = (table.game.expansions || []).map((e) => e.name);
+        finalSelections.push({
+          gameId: table.game.id,
+          gameName: table.game.name,
+          expansionIds: [],
+          expansionNames: expNames,
+          tableNumber: table.tableNumber,
+          tablePlayerCount: table.players.length,
+          tablePlayers: table.players.map((p) => ({
+            id: p.id,
+            name: p.name
+          })),
+          score: table.score,
+          reasons: table.reasons || [],
+          warnings: table.warnings || [],
+          planId
+        });
+      }
     }
-  } else if (result.type === "split" && result.plans && result.plans.length > 0) {
-    const topPlan = result.plans[0];
-    for (const table of topPlan.tables) {
-      finalSelections.push({
-        gameId: table.game.id,
-        gameName: table.game.name,
-        expansionIds: []
-      });
+  } else if (selectedIds.length > 0) {
+    for (const gameId of selectedIds) {
+      if (gameId.startsWith("plan:")) continue;
+      const game = state.games.find((g) => g.id === gameId);
+      const rec = (result.recommendations || []).find((r) => r.game.id === gameId);
+      if (game) {
+        const expNames = (game.expansions || []).map((e) => e.name);
+        finalSelections.push({
+          gameId: game.id,
+          gameName: game.name,
+          expansionIds: [],
+          expansionNames: expNames,
+          score: rec ? rec.score : null,
+          reasons: rec ? rec.reasons || [] : [],
+          warnings: rec ? rec.warnings || [] : [],
+          planId: ""
+        });
+      }
     }
   }
+  if (finalSelections.length === 0) {
+    if (result.type === "single" && result.recommendations) {
+      const topRecs = result.recommendations.slice(0, 3);
+      for (const rec of topRecs) {
+        const expNames = (rec.game.expansions || []).map((e) => e.name);
+        finalSelections.push({
+          gameId: rec.game.id,
+          gameName: rec.game.name,
+          expansionIds: [],
+          expansionNames: expNames,
+          score: rec.score,
+          reasons: rec.reasons || [],
+          warnings: rec.warnings || [],
+          planId: ""
+        });
+      }
+    } else if (result.type === "split" && result.plans && result.plans.length > 0) {
+      const topPlan = result.plans[0];
+      selectedPlanId = topPlan.id;
+      selectedPlanTotalScore = topPlan.totalScore;
+      for (const table of topPlan.tables) {
+        const expNames = (table.game.expansions || []).map((e) => e.name);
+        finalSelections.push({
+          gameId: table.game.id,
+          gameName: table.game.name,
+          expansionIds: [],
+          expansionNames: expNames,
+          tableNumber: table.tableNumber,
+          tablePlayerCount: table.players.length,
+          tablePlayers: table.players.map((p) => ({
+            id: p.id,
+            name: p.name
+          })),
+          score: table.score,
+          reasons: table.reasons || [],
+          warnings: table.warnings || [],
+          planId: topPlan.id
+        });
+      }
+    }
+  }
+  const sourceArchive = partyState.sourceArchiveId
+    ? (state.partyArchives || []).find((a) => a.id === partyState.sourceArchiveId)
+    : null;
   const archive = normalizePartyArchive({
     id: generateId(),
     name: partyState.name || `聚会 ${formatDate(new Date().toISOString())}`,
@@ -7533,13 +7782,16 @@ function savePartyArchive(sourceArchiveId) {
       type: result.type,
       summary: result.type === "single"
         ? `${(result.recommendations || []).length} 个推荐`
-        : `${(result.plans || []).length} 个分桌方案`
+        : `${(result.plans || []).length} 个分桌方案`,
+      totalScore: selectedPlanTotalScore
     },
     finalSelections,
+    selectedPlanId,
     reviewHighlights,
     disputeRulings,
     actualResults: null,
-    sourceArchiveId: sourceArchiveId || ""
+    sourceArchiveId: partyState.sourceArchiveId || "",
+    sourceArchiveName: sourceArchive ? sourceArchive.name : ""
   });
   if (!Array.isArray(state.partyArchives)) {
     state.partyArchives = [];
@@ -7661,8 +7913,15 @@ function renderArchiveDetail(archiveId) {
     <div class="archive-meta" style="margin-top:4px;">
       <span>创建于 ${formatDate(archive.createdAt)}</span>
       <span>${archive.playerCount} 人聚会</span>
-      ${(archive.candidateGameRefs || []).length} 个候选桌游
+      <span>${(archive.candidateGameRefs || []).length} 个候选桌游</span>
     </div>
+    ${archive.sourceArchiveId ? `
+      <div class="archive-source-info" style="margin-top:8px;padding:8px 12px;background:var(--bg-soft);border-radius:8px;font-size:13px;">
+        <span style="color:var(--muted);">📌 来源：</span>
+        <span style="color:var(--lavender);font-weight:600;">${escapeHtml(archive.sourceArchiveName || "历史方案")}</span>
+        <span style="color:var(--muted);font-size:12px;">（${archive.sourceArchiveId.slice(0, 8)}...）</span>
+      </div>
+    ` : ""}
   </div>`;
   const playerNames = (archive.players || []).map((p) => p.name).join("、");
   if (playerNames) {
@@ -7702,18 +7961,77 @@ function renderArchiveDetail(archiveId) {
     </div>
   </div>`;
   if (archive.finalSelections && archive.finalSelections.length > 0) {
+    const hasTables = archive.finalSelections.some((s) => s.tableNumber);
+    const selectionsByPlan = {};
+    for (const s of archive.finalSelections) {
+      const key = s.planId || "single";
+      if (!selectionsByPlan[key]) selectionsByPlan[key] = [];
+      selectionsByPlan[key].push(s);
+    }
     html += `<div class="archive-detail-section">
       <h4>🎯 最终选择</h4>
-      <div class="archive-detail-games">
-        ${archive.finalSelections.map((s) => {
+      <div class="archive-detail-final-selections">`;
+    if (hasTables) {
+      for (const planId of Object.keys(selectionsByPlan)) {
+        const selections = selectionsByPlan[planId];
+        const planTotalScore = selections.reduce((sum, s) => sum + (s.score || 0), 0);
+        html += `<div class="archive-final-plan">
+          <div class="archive-final-plan-head">
+            <span class="archive-final-plan-title">${selections.length} 桌分桌方案</span>
+            <span class="archive-final-plan-score">总分 ${planTotalScore}</span>
+          </div>
+          <div class="archive-final-tables">`;
+        for (const s of selections) {
           const status = getGameRefStatus(s.gameId);
-          return `<div class="archive-detail-game-item ${status.deleted ? "deleted" : ""}">
-            <span>${escapeHtml(s.gameName)}</span>
-            ${status.deleted ? `<span class="archive-game-status deleted">已删除</span>` : ""}
-          </div>`;
-        }).join("")}
-      </div>
-    </div>`;
+          const playerNames = (s.tablePlayers || []).map((p) => escapeHtml(p.name)).join("、");
+          const expansions = (s.expansionNames || []).length > 0
+            ? `<div class="archive-selection-exps">🧩 ${s.expansionNames.map((n) => escapeHtml(n)).join("、")}</div>`
+            : "";
+          const reasonsHtml = (s.reasons || []).length > 0
+            ? `<div class="archive-selection-reasons"><span>推荐理由：</span>${s.reasons.slice(0, 2).map((r) => `<span>• ${escapeHtml(r)}</span>`).join("")}</div>`
+            : "";
+          html += `
+            <div class="archive-final-table ${status.deleted ? "deleted" : ""}">
+              <div class="archive-final-table-head">
+                <span class="archive-table-number">第${s.tableNumber}桌</span>
+                <span class="archive-table-game">${escapeHtml(s.gameName)}</span>
+                <span class="archive-table-score">${s.score !== null ? s.score : "—"}分</span>
+                ${status.deleted ? `<span class="archive-game-status deleted">已删除</span>` : ""}
+              </div>
+              ${expansions}
+              <div class="archive-table-players">👥 ${s.tablePlayerCount || s.tablePlayers?.length || 0}人：${playerNames || "—"}</div>
+              ${reasonsHtml}
+            </div>
+          `;
+        }
+        html += `</div></div>`;
+      }
+    } else {
+      for (const s of archive.finalSelections) {
+        const status = getGameRefStatus(s.gameId);
+        const expansions = (s.expansionNames || []).length > 0
+          ? `<span class="archive-selection-exps-inline" style="font-size:11px;color:var(--lavender);margin-left:8px;">🧩 ${s.expansionNames.map((n) => escapeHtml(n)).join("、")}</span>`
+          : "";
+        const scoreBadge = s.score !== null
+          ? `<span class="archive-selection-score" style="margin-left:auto;font-weight:700;color:var(--green);">${s.score}分</span>`
+          : "";
+        const reasonsHtml = (s.reasons || []).length > 0
+          ? `<div class="archive-selection-reasons-single" style="font-size:11px;color:var(--muted);margin-top:4px;">${s.reasons.slice(0, 2).map((r) => escapeHtml(r)).join(" · ")}</div>`
+          : "";
+        html += `
+          <div class="archive-detail-game-item ${status.deleted ? "deleted" : ""}" style="flex-direction:column;align-items:flex-start;gap:4px;">
+            <div style="display:flex;align-items:center;width:100%;">
+              <span style="font-weight:600;">${escapeHtml(s.gameName)}</span>
+              ${expansions}
+              ${scoreBadge}
+              ${status.deleted ? `<span class="archive-game-status deleted">已删除</span>` : ""}
+            </div>
+            ${reasonsHtml}
+          </div>
+        `;
+      }
+    }
+    html += `</div></div>`;
   }
   if (archive.reviewHighlights && archive.reviewHighlights.length > 0) {
     html += `<div class="archive-detail-section">
@@ -7801,6 +8119,8 @@ function copyFromArchive(archiveId) {
   partyState.name = `${archive.name}（复制）`;
   partyState.playerCount = archive.playerCount;
   partyState.candidateIds = validCandidateIds;
+  partyState.sourceArchiveId = archiveId;
+  partyState.finalSelectionIds = [];
   partyState.players = (archive.players || []).map((p, i) => {
     const familiarIds = (p.familiarGameIds || []).filter((id) => state.games.some((g) => g.id === id));
     return {
