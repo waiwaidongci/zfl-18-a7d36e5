@@ -5254,3 +5254,459 @@ label {
     width: 100%;
   }
 }
+
+.archive-panel {
+  margin-bottom: 16px;
+}
+
+.archive-hint {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.archive-list {
+  display: grid;
+  gap: 10px;
+}
+
+.archive-empty {
+  text-align: center;
+  padding: 24px 20px;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.archive-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.archive-card:hover {
+  border-color: var(--blue);
+  transform: translateY(-1px);
+}
+
+.archive-card.has-results {
+  border-left: 3px solid var(--green);
+}
+
+.archive-card.no-results {
+  border-left: 3px solid var(--yellow);
+}
+
+.archive-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(116, 100, 155, 0.1);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.archive-card.has-results .archive-icon {
+  background: rgba(57, 116, 91, 0.1);
+}
+
+.archive-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.archive-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.archive-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.archive-badge.recorded {
+  background: rgba(57, 116, 91, 0.12);
+  color: var(--green);
+}
+
+.archive-badge.pending {
+  background: rgba(213, 162, 61, 0.15);
+  color: var(--yellow);
+}
+
+.archive-badge.from-archive {
+  background: rgba(116, 100, 155, 0.12);
+  color: var(--lavender);
+}
+
+.archive-delete-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.archive-delete-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(179, 72, 72, 0.06);
+}
+
+.archive-save-btn {
+  background: rgba(116, 100, 155, 0.12);
+  border-color: rgba(116, 100, 155, 0.3);
+  color: var(--lavender);
+}
+
+.archive-save-btn:hover {
+  background: var(--lavender);
+  border-color: var(--lavender);
+  color: #fff;
+}
+
+.archive-detail-dialog {
+  max-width: 680px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.archive-detail-dialog .dialog-body {
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.archive-detail-section {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.archive-detail-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.archive-detail-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.archive-detail-players {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.archive-detail-player-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(116, 100, 155, 0.1);
+  color: var(--lavender);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.archive-detail-games {
+  display: grid;
+  gap: 6px;
+}
+
+.archive-detail-game-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(49, 95, 134, 0.04);
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.archive-detail-game-item.deleted {
+  background: rgba(179, 72, 72, 0.06);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.archive-detail-game-item .archive-game-status {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.archive-detail-game-item .archive-game-status.on-loan {
+  background: rgba(49, 95, 134, 0.12);
+  color: var(--blue);
+}
+
+.archive-detail-game-item .archive-game-status.available {
+  background: rgba(57, 116, 91, 0.12);
+  color: var(--green);
+}
+
+.archive-detail-game-item .archive-game-status.deleted {
+  background: rgba(179, 72, 72, 0.12);
+  color: var(--red);
+}
+
+.archive-detail-highlights {
+  display: grid;
+  gap: 6px;
+}
+
+.archive-detail-highlight-item {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(213, 162, 61, 0.06);
+  border-left: 3px solid var(--yellow);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.archive-detail-ruling-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  margin-bottom: 6px;
+}
+
+.archive-detail-ruling-dispute {
+  font-size: 12px;
+  color: var(--yellow);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.archive-detail-ruling-decision {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.archive-detail-ruling-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.archive-detail-results {
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(57, 116, 91, 0.06);
+  border: 1px solid rgba(57, 116, 91, 0.2);
+}
+
+.archive-detail-results-date {
+  font-size: 12px;
+  color: var(--green);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.archive-detail-results-games {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.archive-detail-results-game {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.archive-detail-results-notes {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.5;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.archive-detail-risk-warnings {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(179, 72, 72, 0.06);
+  border-left: 3px solid var(--red);
+  margin-top: 8px;
+}
+
+.archive-detail-risk-warnings h5 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--red);
+  font-weight: 800;
+}
+
+.archive-detail-risk-warnings ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.archive-detail-risk-warnings li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.archive-actual-result-dialog {
+  max-width: 560px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.archive-actual-result-form {
+  display: grid;
+  gap: 12px;
+}
+
+.actual-result-games-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.actual-result-games-list {
+  display: grid;
+  gap: 6px;
+}
+
+.actual-result-game-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.actual-result-game-item:hover {
+  border-color: var(--green);
+}
+
+.actual-result-game-item.checked {
+  background: rgba(57, 116, 91, 0.08);
+  border-color: var(--green);
+}
+
+.actual-result-game-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--green);
+  flex-shrink: 0;
+}
+
+.actual-result-game-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actual-result-game-notes {
+  width: 120px;
+  min-width: 80px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+@media (max-width: 640px) {
+  .archive-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .archive-icon {
+    display: none;
+  }
+
+  .archive-detail-dialog {
+    max-width: calc(100vw - 20px);
+    max-height: 95vh;
+  }
+
+  .archive-detail-players {
+    flex-direction: column;
+  }
+
+  .archive-detail-dialog .dialog-foot {
+    flex-direction: column;
+  }
+
+  .archive-detail-dialog .dialog-foot button {
+    width: 100%;
+  }
+
+  .actual-result-game-notes {
+    width: 80px;
+    min-width: 60px;
+  }
+}

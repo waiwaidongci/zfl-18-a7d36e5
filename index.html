@@ -366,6 +366,7 @@
           <div class="party-result-header">
             <h3 id="partyResultTitle">聚会准备方案</h3>
             <div class="party-result-actions">
+              <button id="partySaveArchiveBtn" type="button" class="archive-save-btn">📁 保存方案</button>
               <button id="partyBackToConfigBtn" type="button">修改配置</button>
               <button id="partyResetBtn" type="button" class="danger">重新开始</button>
             </div>
@@ -375,6 +376,58 @@
           <div id="partyPreparation" class="party-preparation"></div>
         </div>
       </section>
+
+      <section class="archive-panel panel" id="archivePanel">
+        <div class="panel-head">
+          <h2>📁 聚会方案归档</h2>
+          <span id="archiveCount">0 个方案</span>
+        </div>
+        <div class="archive-hint">保存、复用和复盘历次聚会方案，下次创建聚会时可基于历史方案复制并重新计算风险。</div>
+        <div id="archiveList" class="archive-list"></div>
+      </section>
+
+      <div id="archiveDetailDialog" class="dialog-overlay hidden">
+        <div class="dialog archive-detail-dialog">
+          <div class="dialog-head">
+            <h3 id="archiveDetailTitle">方案详情</h3>
+            <button id="archiveDetailCloseBtn" type="button" class="dialog-close">×</button>
+          </div>
+          <div class="dialog-body" id="archiveDetailContent"></div>
+          <div class="dialog-foot">
+            <button id="archiveDetailCopyBtn" type="button" class="primary">📋 复制创建新聚会</button>
+            <button id="archiveDetailRecordBtn" type="button">📝 记录游玩结果</button>
+            <button id="archiveDetailDeleteBtn" type="button" class="danger">删除方案</button>
+            <button id="archiveDetailCancelBtn" type="button" class="secondary">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="archiveActualResultDialog" class="dialog-overlay hidden">
+        <div class="dialog archive-actual-result-dialog">
+          <div class="dialog-head">
+            <h3>📝 记录实际游玩结果</h3>
+            <button id="archiveActualResultCloseBtn" type="button" class="dialog-close">×</button>
+          </div>
+          <form id="archiveActualResultForm" class="archive-actual-result-form">
+            <label>
+              实际游玩日期
+              <input id="actualResultDateInput" type="date" required />
+            </label>
+            <div class="actual-result-games-section">
+              <h4>实际玩了的桌游</h4>
+              <div id="actualResultGamesList" class="actual-result-games-list"></div>
+            </div>
+            <label>
+              总体备注
+              <textarea id="actualResultNotesInput" rows="3" placeholder="记录本次聚会的整体感受、下次可以改进的地方等"></textarea>
+            </label>
+            <div class="dialog-actions">
+              <button id="actualResultCancelBtn" type="button">取消</button>
+              <button id="actualResultSubmitBtn" type="submit" class="primary">保存结果</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <div id="reviewSessionDialog" class="dialog-overlay review-session-overlay hidden">
         <div class="dialog review-session-dialog">

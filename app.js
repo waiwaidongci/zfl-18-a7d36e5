@@ -1,5 +1,5 @@
 const storageKey = "zfl18-boardgame-rule-cards";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const today = new Date();
 
 const HISTORY_LIMIT_PER_GAME = 50;
@@ -23,7 +23,10 @@ const HISTORY_ACTION = {
   LOAN_RETURN: "loan_return",
   COVER_CHANGE: "cover_change",
   COVER_REMOVE: "cover_remove",
-  BATCH_EDIT: "batch_edit"
+  BATCH_EDIT: "batch_edit",
+  ARCHIVE_SAVE: "archive_save",
+  ARCHIVE_DELETE: "archive_delete",
+  ARCHIVE_UPDATE: "archive_update"
 };
 
 const HISTORY_ACTION_LABELS = {
@@ -44,7 +47,10 @@ const HISTORY_ACTION_LABELS = {
   [HISTORY_ACTION.LOAN_RETURN]: { emoji: "📥", label: "归还桌游", cssClass: "loan_return" },
   [HISTORY_ACTION.COVER_CHANGE]: { emoji: "🖼️", label: "更新封面", cssClass: "cover_change" },
   [HISTORY_ACTION.COVER_REMOVE]: { emoji: "🏞️", label: "移除封面", cssClass: "cover_remove" },
-  [HISTORY_ACTION.BATCH_EDIT]: { emoji: "📦", label: "批量编辑保存", cssClass: "batch_edit" }
+  [HISTORY_ACTION.BATCH_EDIT]: { emoji: "📦", label: "批量编辑保存", cssClass: "batch_edit" },
+  [HISTORY_ACTION.ARCHIVE_SAVE]: { emoji: "📁", label: "保存聚会方案", cssClass: "archive_save" },
+  [HISTORY_ACTION.ARCHIVE_DELETE]: { emoji: "🗑️", label: "删除聚会方案", cssClass: "archive_delete" },
+  [HISTORY_ACTION.ARCHIVE_UPDATE]: { emoji: "✏️", label: "更新聚会方案", cssClass: "archive_update" }
 };
 
 const RULE_CATEGORY_DISPLAY = {
@@ -348,6 +354,93 @@ function migrateV3ToV4(parsed) {
   }
   result.schemaVersion = SCHEMA_VERSION;
   return result;
+}
+
+function migrateV4ToV5(parsed) {
+  const result = { ...parsed };
+  if (!Array.isArray(result.partyArchives)) {
+    result.partyArchives = [];
+  }
+  result.schemaVersion = SCHEMA_VERSION;
+  return result;
+}
+
+function normalizePartyArchive(archive) {
+  if (!archive || typeof archive !== "object") return null;
+  return {
+    id: archive.id || generateId(),
+    name: String(archive.name || ""),
+    createdAt: archive.createdAt || new Date().toISOString(),
+    playerCount: Number(archive.playerCount) || 4,
+    players: Array.isArray(archive.players)
+      ? archive.players.map((p) => ({
+          id: p.id || generateId(),
+          name: String(p.name || ""),
+          dislikedComplexity: Array.isArray(p.dislikedComplexity) ? p.dislikedComplexity : [],
+          familiarGameIds: Array.isArray(p.familiarGameIds) ? p.familiarGameIds : []
+        }))
+      : [],
+    candidateGameRefs: Array.isArray(archive.candidateGameRefs)
+      ? archive.candidateGameRefs.map((ref) => ({
+          gameId: String(ref.gameId || ""),
+          gameName: String(ref.gameName || "未知桌游"),
+          expansions: Array.isArray(ref.expansions)
+            ? ref.expansions.map((e) => ({
+                expansionId: String(e.expansionId || ""),
+                expansionName: String(e.expansionName || "未知扩展包")
+              }))
+            : []
+        }))
+      : [],
+    recommendationSnapshot: archive.recommendationSnapshot || null,
+    finalSelections: Array.isArray(archive.finalSelections)
+      ? archive.finalSelections.map((s) => ({
+          gameId: String(s.gameId || ""),
+          gameName: String(s.gameName || "未知桌游"),
+          expansionIds: Array.isArray(s.expansionIds) ? s.expansionIds : []
+        }))
+      : [],
+    reviewHighlights: Array.isArray(archive.reviewHighlights)
+      ? archive.reviewHighlights.map((r) => ({
+          gameId: String(r.gameId || ""),
+          gameName: String(r.gameName || "未知桌游"),
+          expansionId: String(r.expansionId || ""),
+          expansionName: String(r.expansionName || ""),
+          ruleKey: String(r.ruleKey || ""),
+          ruleText: String(r.ruleText || "")
+        }))
+      : [],
+    disputeRulings: Array.isArray(archive.disputeRulings)
+      ? archive.disputeRulings.map((d) => ({
+          gameId: String(d.gameId || ""),
+          gameName: String(d.gameName || "未知桌游"),
+          expansionId: String(d.expansionId || ""),
+          disputeText: String(d.disputeText || ""),
+          rulingDecision: String(d.rulingDecision || ""),
+          rulingDate: String(d.rulingDate || ""),
+          rulingParticipants: Number(d.rulingParticipants) || 0
+        }))
+      : [],
+    actualResults: archive.actualResults
+      ? {
+          playedAt: String(archive.actualResults.playedAt || ""),
+          gamesPlayed: Array.isArray(archive.actualResults.gamesPlayed)
+            ? archive.actualResults.gamesPlayed.map((g) => ({
+                gameId: String(g.gameId || ""),
+                gameName: String(g.gameName || "未知桌游"),
+                notes: String(g.notes || "")
+              }))
+            : [],
+          overallNotes: String(archive.actualResults.overallNotes || "")
+        }
+      : null,
+    sourceArchiveId: String(archive.sourceArchiveId || "")
+  };
+}
+
+function normalizePartyArchiveArray(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(normalizePartyArchive).filter(Boolean);
 }
 
 function createHistoryEntry(options) {
@@ -658,6 +751,9 @@ function runMigrations(parsed) {
   if (currentVersion < 4) {
     migrated = migrateV3ToV4(migrated);
   }
+  if (currentVersion < 5) {
+    migrated = migrateV4ToV5(migrated);
+  }
   return migrated;
 }
 
@@ -676,6 +772,7 @@ const defaultState = {
   checklistTagFilter: "",
   partyTagFilter: "",
   globalUndoStack: [],
+  partyArchives: [],
   games: [
     {
       id: crypto.randomUUID(),
@@ -1040,7 +1137,8 @@ function loadState() {
     listTagFilter: typeof migrated.listTagFilter === "string" ? migrated.listTagFilter : "",
     checklistTagFilter: typeof migrated.checklistTagFilter === "string" ? migrated.checklistTagFilter : "",
     partyTagFilter: typeof migrated.partyTagFilter === "string" ? migrated.partyTagFilter : "",
-    globalUndoStack: Array.isArray(migrated.globalUndoStack) ? migrated.globalUndoStack : []
+    globalUndoStack: Array.isArray(migrated.globalUndoStack) ? migrated.globalUndoStack : [],
+    partyArchives: normalizePartyArchiveArray(migrated.partyArchives)
   };
     if (saved !== JSON.stringify(result)) {
       localStorage.setItem(storageKey, JSON.stringify(result));
@@ -2892,6 +2990,7 @@ function renderAll() {
   renderDetail();
   renderCoverGallery();
   renderChecklistGames();
+  renderArchiveList();
 }
 
 function readFileAsDataUrl(file) {
@@ -3188,24 +3287,35 @@ els.detailView.addEventListener("click", (event) => {
   }
 
   if (deleteButton) {
-    const deletedGame = structuredClone(game);
-    const deleteEntry = createHistoryEntry({
-      action: HISTORY_ACTION.GAME_DELETE,
-      gameId: game.id,
-      description: `删除桌游《${game.name}》`,
-      targetType: "game",
-      targetId: game.id,
-      before: deletedGame
-    });
-    pushHistoryEntry(game.id, deleteEntry);
-    state.games = state.games.filter((item) => item.id !== game.id);
-    state.selectedId = state.games[0]?.id || "";
-    state.selectedExpansionId = "";
-    syncChecklistSelection();
-    if (!els.checklistView.classList.contains("hidden")) {
-      renderChecklist();
-    }
-    renderAll();
+    const archiveRefs = getArchivesReferencingGame(game.id);
+    const archiveWarning = archiveRefs.length > 0
+      ? `\n\n⚠️ 该桌游被 ${archiveRefs.length} 个归档方案引用：${archiveRefs.map(a => `「${a.name}」`).join("、")}。删除后归档中仍保留历史名称，但会标记为「已删除」。`
+      : "";
+    showConfirm(
+      "删除桌游",
+      `确定要删除桌游《${game.name}》吗？此操作不可撤销。${archiveWarning}`,
+      () => {
+        const deletedGame = structuredClone(game);
+        const deleteEntry = createHistoryEntry({
+          action: HISTORY_ACTION.GAME_DELETE,
+          gameId: game.id,
+          description: `删除桌游《${game.name}》`,
+          targetType: "game",
+          targetId: game.id,
+          before: deletedGame
+        });
+        pushHistoryEntry(game.id, deleteEntry);
+        state.games = state.games.filter((item) => item.id !== game.id);
+        state.selectedId = state.games[0]?.id || "";
+        state.selectedExpansionId = "";
+        syncChecklistSelection();
+        if (!els.checklistView.classList.contains("hidden")) {
+          renderChecklist();
+        }
+        renderArchiveList();
+        renderAll();
+      }
+    );
   }
 
   if (editButton) {
@@ -3511,7 +3621,8 @@ function exportData() {
     exportedAt: new Date().toISOString(),
     games: state.games,
     filterViews: Array.isArray(state.filterViews) ? state.filterViews : [],
-    activeFilterViewId: state.activeFilterViewId || ""
+    activeFilterViewId: state.activeFilterViewId || "",
+    partyArchives: Array.isArray(state.partyArchives) ? state.partyArchives : []
   };
   const jsonStr = JSON.stringify(exportObj, null, 2);
   const blob = new Blob([jsonStr], { type: "application/json" });
@@ -4114,7 +4225,7 @@ function renderImportPreview() {
   els.importPreviewSummaryText.textContent = `共 ${toProcess} 个桌游将被处理`;
 }
 
-function openImportPreview(importData, importedFilterViews, importedActiveFilterViewId) {
+function openImportPreview(importData, importedFilterViews, importedActiveFilterViewId, importedPartyArchives) {
   const importItems = analyzeImportData(importData);
   importPreviewState = {
     importItems,
@@ -4123,7 +4234,8 @@ function openImportPreview(importData, importedFilterViews, importedActiveFilter
     filter: "all",
     importData,
     importedFilterViews,
-    importedActiveFilterViewId
+    importedActiveFilterViewId,
+    importedPartyArchives: importedPartyArchives || []
   };
   const strategyRadios = document.querySelectorAll('input[name="importGlobalStrategy"]');
   for (const radio of strategyRadios) {
@@ -4145,7 +4257,8 @@ function closeImportPreview() {
     filter: "all",
     importData: null,
     importedFilterViews: [],
-    importedActiveFilterViewId: ""
+    importedActiveFilterViewId: "",
+    importedPartyArchives: []
   };
 }
 
@@ -4177,7 +4290,8 @@ async function handleImportFile(file) {
     const importedActiveFilterViewId = typeof migrated.activeFilterViewId === "string"
       ? migrated.activeFilterViewId
       : "";
-    openImportPreview(games, importedFilterViews, importedActiveFilterViewId);
+    const importedPartyArchives = normalizePartyArchiveArray(migrated.partyArchives);
+    openImportPreview(games, importedFilterViews, importedActiveFilterViewId, importedPartyArchives);
   } catch (err) {
     showBackupMessage(`导入失败：${err.message}`, "error");
   } finally {
@@ -4186,7 +4300,7 @@ async function handleImportFile(file) {
 }
 
 function confirmAndExecuteImport() {
-  const { importItems, globalStrategy, individualStrategies, importedFilterViews, importedActiveFilterViewId } = importPreviewState;
+  const { importItems, globalStrategy, individualStrategies, importedFilterViews, importedActiveFilterViewId, importedPartyArchives } = importPreviewState;
   const processedGames = executeImport(importItems, globalStrategy, individualStrategies);
   const newCount = importItems.filter(i => i.status === IMPORT_ITEM_STATUS.NEW).length;
   const mergedCount = importItems.filter(i => {
@@ -4222,6 +4336,21 @@ function confirmAndExecuteImport() {
       }
     }
   }
+  if (importedPartyArchives && importedPartyArchives.length > 0) {
+    const existingArchiveNames = new Set((state.partyArchives || []).map(a => `${a.name}::${a.createdAt}`));
+    let importedArchiveCount = 0;
+    for (const archive of importedPartyArchives) {
+      const key = `${archive.name}::${archive.createdAt}`;
+      if (!existingArchiveNames.has(key)) {
+        state.partyArchives.push(archive);
+        existingArchiveNames.add(key);
+        importedArchiveCount++;
+      }
+    }
+    if (importedArchiveCount > 0) {
+      state.partyArchives.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+  }
   saveState();
   renderAll();
   closeImportPreview();
@@ -4232,6 +4361,13 @@ function confirmAndExecuteImport() {
   if (overwrittenCount > 0) parts.push(`覆盖 ${overwrittenCount} 个桌游`);
   if (skippedCount > 0) parts.push(`跳过 ${skippedCount} 个相同桌游`);
   if (importedFilterViews.length > 0) parts.push(`导入 ${importedFilterViews.length} 个筛选视图`);
+  if (importedPartyArchives && importedPartyArchives.length > 0) {
+    const newArchiveCount = importedPartyArchives.filter(a => {
+      const key = `${a.name}::${a.createdAt}`;
+      return !(importPreviewState._existingArchiveKeysBefore || []).has(key);
+    }).length;
+    if (newArchiveCount > 0) parts.push(`导入 ${newArchiveCount} 个聚会方案`);
+  }
   successMsg += parts.join("，") + "。";
   showBackupMessage(successMsg, "success");
 }
@@ -4687,9 +4823,13 @@ function deleteExpansion(expansionId) {
   if (!game || !game.expansions) return;
   const expansion = game.expansions.find((e) => e.id === expansionId);
   if (!expansion) return;
+  const archiveRefs = getArchivesReferencingExpansion(expansionId);
+  const archiveWarning = archiveRefs.length > 0
+    ? `\n\n⚠️ 该扩展包被 ${archiveRefs.length} 个归档方案引用：${archiveRefs.map(a => `「${a.name}」`).join("、")}。删除后归档中仍保留历史名称，但会标记为「已删除」。`
+    : "";
   showConfirm(
     "删除扩展包",
-    `确定要删除扩展包《${expansion.name}》吗？该扩展包的所有规则（包括争议裁定记录）都将被删除。可通过撤销功能恢复。`,
+    `确定要删除扩展包《${expansion.name}》吗？该扩展包的所有规则（包括争议裁定记录）都将被删除。可通过撤销功能恢复。${archiveWarning}`,
     () => {
       const expansionSnapshot = structuredClone(expansion);
       let deletedRulings = null;
@@ -4713,6 +4853,7 @@ function deleteExpansion(expansionId) {
         state.selectedExpansionId = "";
       }
       renderExpansionList();
+      renderArchiveList();
       renderAll();
       showBackupMessage(`已删除扩展包《${expansion.name}》。`, "success");
     }
@@ -7298,3 +7439,542 @@ document.addEventListener("keydown", (e) => {
     clearReviewSessionStorage();
   }
 })();
+
+let viewingArchiveId = null;
+let recordingArchiveId = null;
+
+function savePartyArchive(sourceArchiveId) {
+  if (!partyState) return;
+  const candidateGames = state.games.filter((g) => partyState.candidateIds.includes(g.id));
+  const candidateGameRefs = candidateGames.map((g) => ({
+    gameId: g.id,
+    gameName: g.name,
+    expansions: (g.expansions || []).map((e) => ({
+      expansionId: e.id,
+      expansionName: e.name
+    }))
+  }));
+  const reviewHighlights = [];
+  for (const game of candidateGames) {
+    const mustReview = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW);
+    const stillForget = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.STILL_FORGET);
+    for (const r of mustReview) {
+      reviewHighlights.push({
+        gameId: game.id,
+        gameName: game.name,
+        expansionId: "",
+        expansionName: "",
+        ruleKey: "must_review",
+        ruleText: ruleText(r)
+      });
+    }
+    for (const r of stillForget) {
+      reviewHighlights.push({
+        gameId: game.id,
+        gameName: game.name,
+        expansionId: "",
+        expansionName: "",
+        ruleKey: "still_forget",
+        ruleText: ruleText(r)
+      });
+    }
+  }
+  const disputeRulings = [];
+  for (const game of candidateGames) {
+    for (const entry of game.disputeRulings || []) {
+      if (entry.rulings && entry.rulings.length > 0) {
+        const latest = entry.rulings[entry.rulings.length - 1];
+        disputeRulings.push({
+          gameId: game.id,
+          gameName: game.name,
+          expansionId: entry.expansionId || "",
+          disputeText: entry.disputeText,
+          rulingDecision: latest.decision,
+          rulingDate: latest.date,
+          rulingParticipants: latest.participants
+        });
+      }
+    }
+  }
+  const result = generatePartyRecommendations();
+  const finalSelections = [];
+  if (result.type === "single" && result.recommendations) {
+    const topRecs = result.recommendations.slice(0, 3);
+    for (const rec of topRecs) {
+      finalSelections.push({
+        gameId: rec.game.id,
+        gameName: rec.game.name,
+        expansionIds: []
+      });
+    }
+  } else if (result.type === "split" && result.plans && result.plans.length > 0) {
+    const topPlan = result.plans[0];
+    for (const table of topPlan.tables) {
+      finalSelections.push({
+        gameId: table.game.id,
+        gameName: table.game.name,
+        expansionIds: []
+      });
+    }
+  }
+  const archive = normalizePartyArchive({
+    id: generateId(),
+    name: partyState.name || `聚会 ${formatDate(new Date().toISOString())}`,
+    createdAt: new Date().toISOString(),
+    playerCount: partyState.playerCount,
+    players: partyState.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      dislikedComplexity: [...p.dislikedComplexity],
+      familiarGameIds: [...p.familiarGameIds]
+    })),
+    candidateGameRefs,
+    recommendationSnapshot: {
+      type: result.type,
+      summary: result.type === "single"
+        ? `${(result.recommendations || []).length} 个推荐`
+        : `${(result.plans || []).length} 个分桌方案`
+    },
+    finalSelections,
+    reviewHighlights,
+    disputeRulings,
+    actualResults: null,
+    sourceArchiveId: sourceArchiveId || ""
+  });
+  if (!Array.isArray(state.partyArchives)) {
+    state.partyArchives = [];
+  }
+  state.partyArchives.unshift(archive);
+  state.partyArchives.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  saveState();
+  renderArchiveList();
+  showBackupMessage("聚会方案已保存到归档。", "success");
+}
+
+function renderArchiveList() {
+  const archiveListEl = document.querySelector("#archiveList");
+  const archiveCountEl = document.querySelector("#archiveCount");
+  if (!archiveListEl) return;
+  const archives = state.partyArchives || [];
+  if (archiveCountEl) {
+    archiveCountEl.textContent = `${archives.length} 个方案`;
+  }
+  if (archives.length === 0) {
+    archiveListEl.innerHTML = `<div class="archive-empty">暂无归档方案。在多人聚会准备模式生成推荐后，点击「保存方案」即可归档。</div>`;
+    return;
+  }
+  archiveListEl.innerHTML = archives.map((archive) => {
+    const hasResults = !!archive.actualResults;
+    const cardClass = hasResults ? "has-results" : "no-results";
+    const iconEmoji = hasResults ? "✅" : "📁";
+    const resultBadge = hasResults
+      ? `<span class="archive-badge recorded">已记录结果</span>`
+      : `<span class="archive-badge pending">待记录结果</span>`;
+    const sourceBadge = archive.sourceArchiveId
+      ? `<span class="archive-badge from-archive">基于历史方案</span>`
+      : "";
+    const playerCount = archive.playerCount || 0;
+    const playerNames = (archive.players || []).map((p) => p.name).join("、");
+    const gameCount = (archive.candidateGameRefs || []).length;
+    const dateStr = formatDate(archive.createdAt);
+    return `
+      <div class="archive-card ${cardClass}" data-archive-id="${archive.id}">
+        <div class="archive-icon">${iconEmoji}</div>
+        <div class="archive-info">
+          <div class="archive-name">${escapeHtml(archive.name)}</div>
+          <div class="archive-meta">
+            <span>${dateStr}</span>
+            <span>${playerCount}人</span>
+            <span>${gameCount}个桌游</span>
+            ${playerNames ? `<span>👥 ${escapeHtml(playerNames)}</span>` : ""}
+            ${resultBadge}
+            ${sourceBadge}
+          </div>
+        </div>
+        <button type="button" class="archive-delete-btn" data-archive-delete="${archive.id}" title="删除方案">×</button>
+      </div>
+    `;
+  }).join("");
+}
+
+function getGameRefStatus(gameId) {
+  const game = state.games.find((g) => g.id === gameId);
+  if (!game) return { exists: false, name: "已删除", onLoan: false, deleted: true };
+  const currentLoan = getCurrentLoan(game);
+  return {
+    exists: true,
+    name: game.name,
+    onLoan: !!currentLoan,
+    loanBorrower: currentLoan?.borrower || "",
+    deleted: false
+  };
+}
+
+function computeArchiveRiskWarnings(archive) {
+  const warnings = [];
+  for (const ref of archive.candidateGameRefs || []) {
+    const status = getGameRefStatus(ref.gameId);
+    if (status.deleted) {
+      warnings.push(`桌游「${ref.gameName || "未知"}」已被删除，无法基于此方案复用`);
+      continue;
+    }
+    if (status.onLoan) {
+      warnings.push(`桌游「${status.name}」当前借出中（借给 ${status.loanBorrower}），聚会时可能不在馆`);
+    }
+    const game = state.games.find((g) => g.id === ref.gameId);
+    if (game) {
+      const mustReview = getAllRulesIncludingExpansions(game).filter((r) => ruleStatus(r) === REVIEW_STATUS.MUST_REVIEW);
+      if (mustReview.length > 0) {
+        warnings.push(`桌游「${status.name}」有 ${mustReview.length} 条规则标记为「下次必看」，上次方案保存后可能有新增`);
+      }
+      const newExpansions = (game.expansions || []).filter(
+        (e) => !(ref.expansions || []).some((re) => re.expansionId === e.id)
+      );
+      if (newExpansions.length > 0) {
+        warnings.push(`桌游「${status.name}」新增了 ${newExpansions.length} 个扩展包（${newExpansions.map((e) => e.name).join("、")}），可能影响推荐`);
+      }
+    }
+  }
+  for (const ref of archive.candidateGameRefs || []) {
+    for (const expRef of ref.expansions || []) {
+      const game = state.games.find((g) => g.id === ref.gameId);
+      if (!game) continue;
+      const expExists = (game.expansions || []).some((e) => e.id === expRef.expansionId);
+      if (!expExists) {
+        warnings.push(`桌游「${ref.gameName}」的扩展包「${expRef.expansionName}」已被删除`);
+      }
+    }
+  }
+  return warnings;
+}
+
+function renderArchiveDetail(archiveId) {
+  const archive = (state.partyArchives || []).find((a) => a.id === archiveId);
+  if (!archive) return;
+  viewingArchiveId = archiveId;
+  const titleEl = document.querySelector("#archiveDetailTitle");
+  const contentEl = document.querySelector("#archiveDetailContent");
+  if (titleEl) titleEl.textContent = archive.name || "方案详情";
+  let html = "";
+  html += `<div class="archive-detail-section">
+    <h4>📋 基本信息</h4>
+    <div class="archive-meta" style="margin-top:4px;">
+      <span>创建于 ${formatDate(archive.createdAt)}</span>
+      <span>${archive.playerCount} 人聚会</span>
+      ${(archive.candidateGameRefs || []).length} 个候选桌游
+    </div>
+  </div>`;
+  const playerNames = (archive.players || []).map((p) => p.name).join("、");
+  if (playerNames) {
+    html += `<div class="archive-detail-section">
+      <h4>👥 参与玩家</h4>
+      <div class="archive-detail-players">
+        ${(archive.players || []).map((p) => {
+          const disliked = p.dislikedComplexity || [];
+          const dislikedLabel = disliked.length > 0 ? `（不玩${disliked.join("/")}度）` : "";
+          return `<span class="archive-detail-player-chip">${escapeHtml(p.name)}${dislikedLabel}</span>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+  html += `<div class="archive-detail-section">
+    <h4>🎮 候选桌游</h4>
+    <div class="archive-detail-games">
+      ${(archive.candidateGameRefs || []).map((ref) => {
+        const status = getGameRefStatus(ref.gameId);
+        const deletedClass = status.deleted ? "deleted" : "";
+        const loanStatus = status.deleted
+          ? `<span class="archive-game-status deleted">已删除</span>`
+          : status.onLoan
+            ? `<span class="archive-game-status on-loan">借出中</span>`
+            : `<span class="archive-game-status available">在馆</span>`;
+        const expansions = (ref.expansions || []).map((e) => {
+          const game = state.games.find((g) => g.id === ref.gameId);
+          const expExists = game && (game.expansions || []).some((ex) => ex.id === e.expansionId);
+          return `<span style="font-size:11px;color:var(--lavender);margin-left:12px;${expExists ? "" : "text-decoration:line-through;color:var(--muted);"}">🧩 ${escapeHtml(e.expansionName)}${expExists ? "" : "（已删除）"}</span>`;
+        }).join("");
+        return `<div class="archive-detail-game-item ${deletedClass}">
+          <span>${escapeHtml(ref.gameName)}</span>
+          ${expansions}
+          ${loanStatus}
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+  if (archive.finalSelections && archive.finalSelections.length > 0) {
+    html += `<div class="archive-detail-section">
+      <h4>🎯 最终选择</h4>
+      <div class="archive-detail-games">
+        ${archive.finalSelections.map((s) => {
+          const status = getGameRefStatus(s.gameId);
+          return `<div class="archive-detail-game-item ${status.deleted ? "deleted" : ""}">
+            <span>${escapeHtml(s.gameName)}</span>
+            ${status.deleted ? `<span class="archive-game-status deleted">已删除</span>` : ""}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+  if (archive.reviewHighlights && archive.reviewHighlights.length > 0) {
+    html += `<div class="archive-detail-section">
+      <h4>📝 复习重点</h4>
+      <div class="archive-detail-highlights">
+        ${archive.reviewHighlights.slice(0, 10).map((r) => `
+          <div class="archive-detail-highlight-item">
+            <strong>${escapeHtml(r.gameName)}</strong>${r.expansionName ? ` · ${escapeHtml(r.expansionName)}` : ""}：
+            ${escapeHtml(r.ruleText)}
+          </div>
+        `).join("")}
+        ${archive.reviewHighlights.length > 10 ? `<div style="font-size:11px;color:var(--muted);">... 还有 ${archive.reviewHighlights.length - 10} 条</div>` : ""}
+      </div>
+    </div>`;
+  }
+  if (archive.disputeRulings && archive.disputeRulings.length > 0) {
+    html += `<div class="archive-detail-section">
+      <h4>⚖️ 争议裁定</h4>
+      ${archive.disputeRulings.map((d) => `
+        <div class="archive-detail-ruling-item">
+          <div class="archive-detail-ruling-dispute">争议：${escapeHtml(d.disputeText)}</div>
+          <div class="archive-detail-ruling-decision">裁定：${escapeHtml(d.rulingDecision)}</div>
+          <div class="archive-detail-ruling-meta">${formatDate(d.rulingDate)} · ${d.rulingParticipants}人参与 · ${escapeHtml(d.gameName)}</div>
+        </div>
+      `).join("")}
+    </div>`;
+  }
+  if (archive.actualResults) {
+    html += `<div class="archive-detail-section">
+      <h4>✅ 实际游玩结果</h4>
+      <div class="archive-detail-results">
+        <div class="archive-detail-results-date">📅 游玩日期：${formatDate(archive.actualResults.playedAt)}</div>
+        <div class="archive-detail-results-games">
+          ${(archive.actualResults.gamesPlayed || []).map((g) => `
+            <div class="archive-detail-results-game">🎮 ${escapeHtml(g.gameName)}${g.notes ? ` <span style="color:var(--muted);font-weight:400;font-size:11px;">— ${escapeHtml(g.notes)}</span>` : ""}</div>
+          `).join("")}
+        </div>
+        ${archive.actualResults.overallNotes ? `<div class="archive-detail-results-notes">${escapeHtml(archive.actualResults.overallNotes)}</div>` : ""}
+      </div>
+    </div>`;
+  }
+  const riskWarnings = computeArchiveRiskWarnings(archive);
+  if (riskWarnings.length > 0) {
+    html += `<div class="archive-detail-section">
+      <div class="archive-detail-risk-warnings">
+        <h5>⚠️ 当前风险提醒（基于最新数据）</h5>
+        <ul>${riskWarnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul>
+      </div>
+    </div>`;
+  }
+  contentEl.innerHTML = html;
+  document.querySelector("#archiveDetailDialog").classList.remove("hidden");
+}
+
+function closeArchiveDetail() {
+  viewingArchiveId = null;
+  document.querySelector("#archiveDetailDialog")?.classList.add("hidden");
+}
+
+function deleteArchive(archiveId) {
+  showConfirm(
+    "删除归档方案",
+    "确定要删除这个聚会方案归档吗？此操作不可撤销。",
+    () => {
+      state.partyArchives = (state.partyArchives || []).filter((a) => a.id !== archiveId);
+      saveState();
+      renderArchiveList();
+      closeArchiveDetail();
+      showBackupMessage("归档方案已删除。", "success");
+    }
+  );
+}
+
+function copyFromArchive(archiveId) {
+  const archive = (state.partyArchives || []).find((a) => a.id === archiveId);
+  if (!archive) return;
+  const validCandidateIds = (archive.candidateGameRefs || [])
+    .filter((ref) => state.games.some((g) => g.id === ref.gameId))
+    .map((ref) => ref.gameId);
+  if (validCandidateIds.length === 0) {
+    showBackupMessage("无法复制：方案中的候选桌游已全部被删除。", "error");
+    return;
+  }
+  partyState = createEmptyPartyState();
+  partyState.name = `${archive.name}（复制）`;
+  partyState.playerCount = archive.playerCount;
+  partyState.candidateIds = validCandidateIds;
+  partyState.players = (archive.players || []).map((p, i) => {
+    const familiarIds = (p.familiarGameIds || []).filter((id) => state.games.some((g) => g.id === id));
+    return {
+      id: generateId(),
+      index: i,
+      name: p.name,
+      dislikedComplexity: [...(p.dislikedComplexity || [])],
+      familiarGameIds: familiarIds
+    };
+  });
+  syncPartyPlayersCount();
+  els.partyIntro.classList.add("hidden");
+  els.partyConfigView.classList.remove("hidden");
+  els.partyResultView.classList.add("hidden");
+  updatePartyStatusLabel("配置中（基于归档）");
+  showPartyStep(3);
+  closeArchiveDetail();
+  els.partyNameInput.value = partyState.name;
+  els.partyPlayerCountInput.value = partyState.playerCount;
+  const riskWarnings = computeArchiveRiskWarnings(archive);
+  if (riskWarnings.length > 0) {
+    showBackupMessage(`已基于归档创建新聚会配置。注意：${riskWarnings.length} 条风险提醒，请在方案详情中查看。`, "error");
+  } else {
+    showBackupMessage("已基于归档创建新聚会配置，请确认并生成推荐。", "success");
+  }
+}
+
+function openActualResultDialog(archiveId) {
+  const archive = (state.partyArchives || []).find((a) => a.id === archiveId);
+  if (!archive) return;
+  recordingArchiveId = archiveId;
+  const dateInput = document.querySelector("#actualResultDateInput");
+  const notesInput = document.querySelector("#actualResultNotesInput");
+  const gamesListEl = document.querySelector("#actualResultGamesList");
+  if (dateInput) dateInput.value = new Date().toISOString().slice(0, 10);
+  if (notesInput) notesInput.value = archive.actualResults?.overallNotes || "";
+  const games = (archive.candidateGameRefs || []).map((ref) => {
+    const status = getGameRefStatus(ref.gameId);
+    return {
+      gameId: ref.gameId,
+      gameName: ref.gameName,
+      deleted: status.deleted,
+      wasPlayed: archive.actualResults?.gamesPlayed?.some((g) => g.gameId === ref.gameId) || false,
+      notes: archive.actualResults?.gamesPlayed?.find((g) => g.gameId === ref.gameId)?.notes || ""
+    };
+  });
+  if (gamesListEl) {
+    gamesListEl.innerHTML = games.map((g) => `
+      <label class="actual-result-game-item ${g.wasPlayed ? "checked" : ""}" data-actual-game="${g.gameId}">
+        <input type="checkbox" data-actual-game-check="${g.gameId}" ${g.wasPlayed ? "checked" : ""} ${g.deleted ? "disabled" : ""} />
+        <span class="actual-result-game-name" style="${g.deleted ? "text-decoration:line-through;color:var(--muted);" : ""}">${escapeHtml(g.gameName)}${g.deleted ? "（已删除）" : ""}</span>
+        <input type="text" class="actual-result-game-notes" data-actual-game-notes="${g.gameId}" placeholder="备注" value="${escapeHtml(g.notes)}" />
+      </label>
+    `).join("");
+  }
+  closeArchiveDetail();
+  document.querySelector("#archiveActualResultDialog")?.classList.remove("hidden");
+}
+
+function closeActualResultDialog() {
+  recordingArchiveId = null;
+  document.querySelector("#archiveActualResultDialog")?.classList.add("hidden");
+}
+
+function handleActualResultSubmit(e) {
+  e.preventDefault();
+  if (!recordingArchiveId) return;
+  const archive = (state.partyArchives || []).find((a) => a.id === recordingArchiveId);
+  if (!archive) return;
+  const dateInput = document.querySelector("#actualResultDateInput");
+  const notesInput = document.querySelector("#actualResultNotesInput");
+  const playedAt = dateInput?.value || new Date().toISOString().slice(0, 10);
+  const overallNotes = notesInput?.value || "";
+  const gamesPlayed = [];
+  document.querySelectorAll("[data-actual-game-check]").forEach((cb) => {
+    if (cb.checked) {
+      const gameId = cb.dataset.actualGameCheck;
+      const gameName = archive.candidateGameRefs?.find((r) => r.gameId === gameId)?.gameName || "未知桌游";
+      const notesEl = document.querySelector(`[data-actual-game-notes="${gameId}"]`);
+      gamesPlayed.push({
+        gameId,
+        gameName,
+        notes: notesEl?.value || ""
+      });
+    }
+  });
+  archive.actualResults = {
+    playedAt,
+    gamesPlayed,
+    overallNotes
+  };
+  saveState();
+  closeActualResultDialog();
+  renderArchiveList();
+  showBackupMessage("实际游玩结果已保存。", "success");
+}
+
+function getArchivesReferencingGame(gameId) {
+  return (state.partyArchives || []).filter((a) =>
+    (a.candidateGameRefs || []).some((r) => r.gameId === gameId) ||
+    (a.finalSelections || []).some((s) => s.gameId === gameId) ||
+    (a.reviewHighlights || []).some((h) => h.gameId === gameId) ||
+    (a.disputeRulings || []).some((d) => d.gameId === gameId)
+  );
+}
+
+function getArchivesReferencingExpansion(expansionId) {
+  return (state.partyArchives || []).filter((a) =>
+    (a.candidateGameRefs || []).some((r) =>
+      (r.expansions || []).some((e) => e.expansionId === expansionId)
+    )
+  );
+}
+
+document.querySelector("#archiveList")?.addEventListener("click", (e) => {
+  const deleteBtn = e.target.closest("[data-archive-delete]");
+  if (deleteBtn) {
+    e.stopPropagation();
+    deleteArchive(deleteBtn.dataset.archiveDelete);
+    return;
+  }
+  const card = e.target.closest("[data-archive-id]");
+  if (card) {
+    renderArchiveDetail(card.dataset.archiveId);
+    return;
+  }
+});
+
+document.querySelector("#archiveDetailCloseBtn")?.addEventListener("click", closeArchiveDetail);
+document.querySelector("#archiveDetailCancelBtn")?.addEventListener("click", closeArchiveDetail);
+
+document.querySelector("#archiveDetailCopyBtn")?.addEventListener("click", () => {
+  if (viewingArchiveId) copyFromArchive(viewingArchiveId);
+});
+
+document.querySelector("#archiveDetailRecordBtn")?.addEventListener("click", () => {
+  if (viewingArchiveId) openActualResultDialog(viewingArchiveId);
+});
+
+document.querySelector("#archiveDetailDeleteBtn")?.addEventListener("click", () => {
+  if (viewingArchiveId) deleteArchive(viewingArchiveId);
+});
+
+document.querySelector("#archiveActualResultCloseBtn")?.addEventListener("click", closeActualResultDialog);
+document.querySelector("#actualResultCancelBtn")?.addEventListener("click", closeActualResultDialog);
+document.querySelector("#archiveActualResultForm")?.addEventListener("submit", handleActualResultSubmit);
+
+document.querySelector("#archiveActualResultDialog")?.addEventListener("click", (e) => {
+  const gameItem = e.target.closest(".actual-result-game-item");
+  if (gameItem) {
+    const cb = gameItem.querySelector('input[type="checkbox"]');
+    if (cb && !cb.disabled && e.target !== cb) {
+      cb.checked = !cb.checked;
+      gameItem.classList.toggle("checked", cb.checked);
+    }
+  }
+});
+
+document.querySelector("#archiveActualResultDialog")?.addEventListener("change", (e) => {
+  const cb = e.target.closest('[data-actual-game-check]');
+  if (cb) {
+    const item = cb.closest('.actual-result-game-item');
+    if (item) item.classList.toggle("checked", cb.checked);
+  }
+});
+
+document.querySelector("#partySaveArchiveBtn")?.addEventListener("click", () => {
+  if (partyState) {
+    savePartyArchive();
+  }
+});
+
+function renderArchivePanel() {
+  renderArchiveList();
+}
+
+renderArchivePanel();
