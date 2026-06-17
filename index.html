@@ -101,6 +101,7 @@
       <section class="backup-panel">
         <h2>数据备份与恢复</h2>
         <div class="backup-actions">
+          <button id="undoBtn" type="button" class="undo-btn">↩️ 撤销最近操作</button>
           <button id="exportBtn" type="button">导出 JSON</button>
           <button id="importBtn" type="button">导入 JSON</button>
           <input id="importFile" type="file" accept=".json,application/json" hidden />
@@ -108,6 +109,50 @@
         </div>
         <div id="backupMessage" class="backup-message hidden"></div>
       </section>
+
+      <div id="undoDialog" class="dialog-overlay hidden">
+        <div class="dialog undo-dialog">
+          <div class="dialog-head">
+            <h3>选择要撤销的操作</h3>
+            <button id="undoDialogCloseBtn" type="button" class="dialog-close">×</button>
+          </div>
+          <div class="dialog-body">
+            <p class="undo-hint">选择一条操作记录进行撤销（仅可撤销最近的操作，建议按时间顺序从新到旧撤销）：</p>
+            <div id="undoList" class="undo-list"></div>
+          </div>
+          <div class="dialog-foot">
+            <button id="undoDialogCancelBtn" type="button" class="secondary">取消</button>
+            <button id="undoDialogConfirmBtn" type="button" disabled>撤销选中操作</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="historyTimelineDialog" class="dialog-overlay hidden">
+        <div class="dialog history-timeline-dialog">
+          <div class="dialog-head">
+            <h3 id="historyTimelineTitle">变更时间线</h3>
+            <button id="historyTimelineCloseBtn" type="button" class="dialog-close">×</button>
+          </div>
+          <div class="dialog-body">
+            <div id="historyTimelineEmpty" class="timeline-empty hidden">暂无变更记录。</div>
+            <div id="historyTimelineList" class="timeline-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="historyRestoreDialog" class="dialog-overlay hidden">
+        <div class="dialog history-restore-dialog">
+          <div class="dialog-head">
+            <h3 id="historyRestoreDialogTitle">恢复数据确认</h3>
+            <button id="historyRestoreDialogCloseBtn" type="button" class="dialog-close">×</button>
+          </div>
+          <div class="dialog-body" id="historyRestoreContent"></div>
+          <div class="dialog-foot">
+            <button id="historyRestoreDialogCancelBtn" type="button" class="secondary">取消</button>
+            <button id="historyRestoreDialogConfirmBtn" type="button">确认恢复</button>
+          </div>
+        </div>
+      </div>
 
       <section class="loan-stats-panel panel" id="loanStatsPanel">
         <div class="panel-head">

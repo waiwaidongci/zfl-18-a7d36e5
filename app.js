@@ -1,6 +1,58 @@
 const storageKey = "zfl18-boardgame-rule-cards";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const today = new Date();
+
+const HISTORY_LIMIT_PER_GAME = 50;
+const GLOBAL_UNDO_LIMIT = 100;
+
+const HISTORY_ACTION = {
+  GAME_CREATE: "game_create",
+  GAME_DELETE: "game_delete",
+  GAME_UPDATE: "game_update",
+  GAME_LAST_PLAYED: "game_last_played",
+  RULE_ADD: "rule_add",
+  RULE_DELETE: "rule_delete",
+  RULE_UPDATE: "rule_update",
+  RULE_STATUS: "rule_status",
+  EXPANSION_ADD: "expansion_add",
+  EXPANSION_DELETE: "expansion_delete",
+  EXPANSION_RENAME: "expansion_rename",
+  RULING_ADD: "ruling_add",
+  RULING_DELETE: "ruling_delete",
+  LOAN_CREATE: "loan_create",
+  LOAN_RETURN: "loan_return",
+  COVER_CHANGE: "cover_change",
+  COVER_REMOVE: "cover_remove",
+  BATCH_EDIT: "batch_edit"
+};
+
+const HISTORY_ACTION_LABELS = {
+  [HISTORY_ACTION.GAME_CREATE]: "🎮 新增桌游",
+  [HISTORY_ACTION.GAME_DELETE]: "🗑️ 删除桌游",
+  [HISTORY_ACTION.GAME_UPDATE]: "✏️ 修改桌游信息",
+  [HISTORY_ACTION.GAME_LAST_PLAYED]: "🎲 标记玩过",
+  [HISTORY_ACTION.RULE_ADD]: "➕ 新增规则",
+  [HISTORY_ACTION.RULE_DELETE]: "➖ 删除规则",
+  [HISTORY_ACTION.RULE_UPDATE]: "📝 修改规则",
+  [HISTORY_ACTION.RULE_STATUS]: "🏷️ 更新复习状态",
+  [HISTORY_ACTION.EXPANSION_ADD]: "🧩 新增扩展包",
+  [HISTORY_ACTION.EXPANSION_DELETE]: "🧹 删除扩展包",
+  [HISTORY_ACTION.EXPANSION_RENAME]: "✏️ 重命名扩展包",
+  [HISTORY_ACTION.RULING_ADD]: "⚖️ 新增裁定",
+  [HISTORY_ACTION.RULING_DELETE]: "❌ 删除裁定",
+  [HISTORY_ACTION.LOAN_CREATE]: "📤 借出桌游",
+  [HISTORY_ACTION.LOAN_RETURN]: "📥 归还桌游",
+  [HISTORY_ACTION.COVER_CHANGE]: "🖼️ 更新封面",
+  [HISTORY_ACTION.COVER_REMOVE]: "🏞️ 移除封面",
+  [HISTORY_ACTION.BATCH_EDIT]: "📦 批量编辑保存"
+};
+
+const RULE_CATEGORY_DISPLAY = {
+  forgets: "容易忘的规则",
+  disputes: "常见争议",
+  setup: "开局准备",
+  scoring: "计分提醒"
+};
 
 const REVIEW_STATUS = {
   UNMARKED: null,
@@ -268,6 +320,323 @@ function migrateV2ToV3(parsed) {
   return result;
 }
 
+function migrateV3ToV4(parsed) {
+  const result = { ...parsed };
+  if (Array.isArray(result.games)) {
+    result.games = result.games.map((game) => {
+      if (!game || typeof game !== "object") return game;
+      const migrated = { ...game };
+      if (!Array.isArray(migrated.changeHistory)) {
+        migrated.changeHistory = [];
+      }
+      if (!Array.isArray(migrated.coverHistory)) {
+        migrated.coverHistory = [];
+      }
+      if (migrated.cover && migrated.coverHistory.length === 0) {
+        migrated.coverHistory.push({
+          id: generateId(),
+          cover: migrated.cover,
+          changedAt: new Date().toISOString(),
+          note: "迁移时自动记录的初始封面"
+        });
+      }
+      return migrated;
+    });
+  }
+  if (!Array.isArray(result.globalUndoStack)) {
+    result.globalUndoStack = [];
+  }
+  result.schemaVersion = SCHEMA_VERSION;
+  return result;
+}
+
+function createHistoryEntry(options) {
+  const {
+    action,
+    gameId,
+    description = "",
+    targetType = "",
+    targetId = "",
+    expansionId = "",
+    ruleKey = "",
+    before = null,
+    after = null,
+    metadata = null
+  } = options;
+  return {
+    id: generateId(),
+    action,
+    gameId: String(gameId || ""),
+    timestamp: new Date().toISOString(),
+    description: String(description || ""),
+    targetType: String(targetType || ""),
+    targetId: String(targetId || ""),
+    expansionId: String(expansionId || ""),
+    ruleKey: String(ruleKey || ""),
+    before: before === undefined ? null : structuredClone(before),
+    after: after === undefined ? null : structuredClone(after),
+    metadata: metadata === undefined ? null : structuredClone(metadata)
+  };
+}
+
+function pushHistoryEntry(gameId, entry) {
+  const game = state.games.find((g) => g.id === gameId);
+  if (!game) return;
+  if (!Array.isArray(game.changeHistory)) {
+    game.changeHistory = [];
+  }
+  game.changeHistory.unshift(entry);
+  if (game.changeHistory.length > HISTORY_LIMIT_PER_GAME) {
+    game.changeHistory.length = HISTORY_LIMIT_PER_GAME;
+  }
+  if (!Array.isArray(state.globalUndoStack)) {
+    state.globalUndoStack = [];
+  }
+  state.globalUndoStack.unshift(entry);
+  if (state.globalUndoStack.length > GLOBAL_UNDO_LIMIT) {
+    state.globalUndoStack.length = GLOBAL_UNDO_LIMIT;
+  }
+}
+
+function getGameHistory(gameId) {
+  const game = state.games.find((g) => g.id === gameId);
+  if (!game) return [];
+  return game.changeHistory || [];
+}
+
+function formatHistoryTimestamp(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return isoString;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yest = new Date(now);
+  yest.setDate(yest.getDate() - 1);
+  const isYesterday = d.toDateString() === yest.toDateString();
+  const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (sameDay) return `今天 ${timeStr}`;
+  if (isYesterday) return `昨天 ${timeStr}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${timeStr}`;
+}
+
+function canUndoEntry(entry) {
+  if (!entry) return false;
+  const undoable = [
+    HISTORY_ACTION.GAME_UPDATE,
+    HISTORY_ACTION.GAME_LAST_PLAYED,
+    HISTORY_ACTION.RULE_ADD,
+    HISTORY_ACTION.RULE_DELETE,
+    HISTORY_ACTION.RULE_UPDATE,
+    HISTORY_ACTION.RULE_STATUS,
+    HISTORY_ACTION.EXPANSION_ADD,
+    HISTORY_ACTION.EXPANSION_DELETE,
+    HISTORY_ACTION.EXPANSION_RENAME,
+    HISTORY_ACTION.RULING_ADD,
+    HISTORY_ACTION.RULING_DELETE,
+    HISTORY_ACTION.LOAN_CREATE,
+    HISTORY_ACTION.LOAN_RETURN,
+    HISTORY_ACTION.COVER_CHANGE,
+    HISTORY_ACTION.COVER_REMOVE,
+    HISTORY_ACTION.BATCH_EDIT
+  ];
+  return undoable.includes(entry.action);
+}
+
+function undoHistoryEntry(entry) {
+  if (!entry || !canUndoEntry(entry)) return false;
+  const { action, gameId, expansionId, ruleKey, targetId, before, metadata } = entry;
+  const gameIndex = state.games.findIndex((g) => g.id === gameId);
+  if (gameIndex === -1 && action !== HISTORY_ACTION.GAME_DELETE) return false;
+  let game = state.games[gameIndex];
+
+  switch (action) {
+    case HISTORY_ACTION.GAME_UPDATE:
+    case HISTORY_ACTION.BATCH_EDIT:
+      if (game && before) {
+        state.games[gameIndex] = {
+          ...game,
+          name: before.name ?? game.name,
+          minPlayers: before.minPlayers ?? game.minPlayers,
+          maxPlayers: before.maxPlayers ?? game.maxPlayers,
+          duration: before.duration ?? game.duration,
+          complexity: before.complexity ?? game.complexity,
+          lastPlayed: before.lastPlayed ?? game.lastPlayed,
+          cover: before.cover ?? game.cover,
+          forgets: before.forgets ?? game.forgets,
+          disputes: before.disputes ?? game.disputes,
+          setup: before.setup ?? game.setup,
+          scoring: before.scoring ?? game.scoring,
+          expansions: before.expansions ?? game.expansions,
+          disputeRulings: before.disputeRulings ?? game.disputeRulings
+        };
+        return true;
+      }
+      return false;
+
+    case HISTORY_ACTION.GAME_LAST_PLAYED:
+      if (game && before) {
+        game.lastPlayed = before.lastPlayed ?? game.lastPlayed;
+        return true;
+      }
+      return false;
+
+    case HISTORY_ACTION.RULE_ADD: {
+      if (!game) return false;
+      const container = getRuleContainer(game, expansionId);
+      if (!container || !Array.isArray(container[ruleKey])) return false;
+      const idx = container[ruleKey].findIndex((r) => r.id === targetId);
+      if (idx !== -1) {
+        container[ruleKey].splice(idx, 1);
+        if (ruleKey === "disputes" && metadata?.disputeText) {
+          game.disputeRulings = (game.disputeRulings || []).filter(
+            (r) => !(r.disputeText === metadata.disputeText && (r.expansionId || "") === (expansionId || ""))
+          );
+        }
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.RULE_DELETE: {
+      if (!game) return false;
+      const container = getRuleContainer(game, expansionId);
+      if (!container || !Array.isArray(container[ruleKey])) return false;
+      if (before && typeof before === "object") {
+        const insertIndex = metadata?.index ?? 0;
+        container[ruleKey].splice(insertIndex, 0, structuredClone(before));
+        if (ruleKey === "disputes") {
+          ensureDisputeRulingEntry(game, ruleText(before), expansionId || "");
+        }
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.RULE_UPDATE: {
+      if (!game) return false;
+      const container = getRuleContainer(game, expansionId);
+      if (!container || !Array.isArray(container[ruleKey])) return false;
+      const idx = container[ruleKey].findIndex((r) => r.id === targetId);
+      if (idx !== -1 && before) {
+        container[ruleKey][idx] = structuredClone(before);
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.RULE_STATUS: {
+      if (!game) return false;
+      const container = getRuleContainer(game, expansionId);
+      if (!container || !Array.isArray(container[ruleKey])) return false;
+      const idx = container[ruleKey].findIndex((r) => r.id === targetId);
+      if (idx !== -1 && before) {
+        container[ruleKey][idx].status = before.status ?? REVIEW_STATUS.UNMARKED;
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.EXPANSION_ADD: {
+      if (!game || !Array.isArray(game.expansions)) return false;
+      const idx = game.expansions.findIndex((e) => e.id === targetId);
+      if (idx !== -1) {
+        game.expansions.splice(idx, 1);
+        game.disputeRulings = (game.disputeRulings || []).filter(
+          (r) => (r.expansionId || "") !== targetId
+        );
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.EXPANSION_DELETE: {
+      if (!game || !Array.isArray(game.expansions)) return false;
+      if (before && typeof before === "object") {
+        const insertIndex = metadata?.index ?? 0;
+        game.expansions.splice(insertIndex, 0, structuredClone(before));
+        if (metadata?.deletedRulings && Array.isArray(metadata.deletedRulings)) {
+          game.disputeRulings = [...(game.disputeRulings || []), ...structuredClone(metadata.deletedRulings)];
+        }
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.EXPANSION_RENAME: {
+      if (!game || !Array.isArray(game.expansions)) return false;
+      const exp = game.expansions.find((e) => e.id === targetId);
+      if (exp && before) {
+        exp.name = before.name ?? exp.name;
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.RULING_ADD: {
+      if (!game || !Array.isArray(game.disputeRulings)) return false;
+      const disputeKey = `${expansionId || ""}::${metadata?.disputeText || ""}`;
+      for (const entry of game.disputeRulings) {
+        const key = `${entry.expansionId || ""}::${entry.disputeText}`;
+        if (key === disputeKey) {
+          const ridx = entry.rulings.findIndex((r) => r.id === targetId);
+          if (ridx !== -1) {
+            entry.rulings.splice(ridx, 1);
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.RULING_DELETE: {
+      if (!game || !Array.isArray(game.disputeRulings)) return false;
+      const disputeKey = `${expansionId || ""}::${metadata?.disputeText || ""}`;
+      for (const entry of game.disputeRulings) {
+        const key = `${entry.expansionId || ""}::${entry.disputeText}`;
+        if (key === disputeKey && before) {
+          entry.rulings.push(structuredClone(before));
+          return true;
+        }
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.LOAN_CREATE: {
+      if (!game || !Array.isArray(game.loanRecords)) return false;
+      const idx = game.loanRecords.findIndex((r) => r.id === targetId);
+      if (idx !== -1) {
+        game.loanRecords.splice(idx, 1);
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.LOAN_RETURN: {
+      if (!game || !Array.isArray(game.loanRecords)) return false;
+      const record = game.loanRecords.find((r) => r.id === targetId);
+      if (record) {
+        record.returnedAt = null;
+        return true;
+      }
+      return false;
+    }
+
+    case HISTORY_ACTION.COVER_CHANGE:
+    case HISTORY_ACTION.COVER_REMOVE: {
+      if (!game) return false;
+      if (before) {
+        game.cover = before.cover ?? "";
+        return true;
+      } else if (action === HISTORY_ACTION.COVER_REMOVE) {
+        game.cover = metadata?.previousCover ?? "";
+        return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
 function runMigrations(parsed) {
   if (!parsed || typeof parsed !== "object") {
     return { schemaVersion: SCHEMA_VERSION, games: [] };
@@ -286,6 +655,9 @@ function runMigrations(parsed) {
   if (currentVersion < 3) {
     migrated = migrateV2ToV3(migrated);
   }
+  if (currentVersion < 4) {
+    migrated = migrateV3ToV4(migrated);
+  }
   return migrated;
 }
 
@@ -303,6 +675,7 @@ const defaultState = {
   listTagFilter: "",
   checklistTagFilter: "",
   partyTagFilter: "",
+  globalUndoStack: [],
   games: [
     {
       id: crypto.randomUUID(),
@@ -340,7 +713,9 @@ const defaultState = {
         { disputeText: "事件顺序和玩家动作结算先后", expansionId: "", rulings: [] },
         { disputeText: "科技板是否能替代所有同类随从", expansionId: "", rulings: [] },
         { disputeText: "贸易卡能否在他人回合使用", expansionId: "", rulings: [] }
-      ])
+      ]),
+      changeHistory: [],
+      coverHistory: []
     },
     {
       id: crypto.randomUUID(),
@@ -360,7 +735,9 @@ const defaultState = {
       disputeRulings: normalizeDisputeRulings([
         { disputeText: "被动充能是否能拒绝", expansionId: "", rulings: [] },
         { disputeText: "星球改造费用受哪些能力影响", expansionId: "", rulings: [] }
-      ])
+      ]),
+      changeHistory: [],
+      coverHistory: []
     },
     {
       id: crypto.randomUUID(),
@@ -380,7 +757,9 @@ const defaultState = {
       disputeRulings: normalizeDisputeRulings([
         { disputeText: "同色砖放置限制是否看整面墙", expansionId: "", rulings: [] },
         { disputeText: "中央区起始玩家标记是否必须拿", expansionId: "", rulings: [] }
-      ])
+      ]),
+      changeHistory: [],
+      coverHistory: []
     }
   ]
 };
@@ -553,7 +932,27 @@ const els = {
   importStatConflict: document.querySelector("#importStatConflict"),
   importPreviewList: document.querySelector("#importPreviewList"),
   importPreviewSummaryText: document.querySelector("#importPreviewSummaryText"),
-  importFilterTabs: document.querySelectorAll(".import-filter-tab")
+  importFilterTabs: document.querySelectorAll(".import-filter-tab"),
+  undoBtn: document.querySelector("#undoBtn"),
+  undoDialog: document.querySelector("#undoDialog"),
+  undoDialogCloseBtn: document.querySelector("#undoDialogCloseBtn"),
+  undoDialogCancelBtn: document.querySelector("#undoDialogCancelBtn"),
+  undoDialogConfirmBtn: document.querySelector("#undoDialogConfirmBtn"),
+  undoList: document.querySelector("#undoList"),
+  undoSelectedEntryId: null,
+  historyTimelineDialog: document.querySelector("#historyTimelineDialog"),
+  historyTimelineCloseBtn: document.querySelector("#historyTimelineCloseBtn"),
+  historyTimelineTitle: document.querySelector("#historyTimelineTitle"),
+  historyTimelineList: document.querySelector("#historyTimelineList"),
+  historyTimelineEmpty: document.querySelector("#historyTimelineEmpty"),
+  historyRestoreDialog: document.querySelector("#historyRestoreDialog"),
+  historyRestoreDialogTitle: document.querySelector("#historyRestoreDialogTitle"),
+  historyRestoreContent: document.querySelector("#historyRestoreContent"),
+  historyRestoreDialogCloseBtn: document.querySelector("#historyRestoreDialogCloseBtn"),
+  historyRestoreDialogCancelBtn: document.querySelector("#historyRestoreDialogCancelBtn"),
+  historyRestoreDialogConfirmBtn: document.querySelector("#historyRestoreDialogConfirmBtn"),
+  pendingRestoreEntry: null,
+  viewHistoryBtn: document.querySelector("#viewHistoryBtn")
 };
 
 function ruleTags(rule) {
@@ -607,7 +1006,9 @@ function loadState() {
             setup: normalizeRuleArray(game.setup),
             scoring: normalizeRuleArray(game.scoring),
             expansions: normalizeExpansionArray(game.expansions),
-            disputeRulings: normalizeDisputeRulings(game.disputeRulings)
+            disputeRulings: normalizeDisputeRulings(game.disputeRulings),
+            changeHistory: Array.isArray(game.changeHistory) ? game.changeHistory : [],
+            coverHistory: Array.isArray(game.coverHistory) ? game.coverHistory : []
           };
           if (normalized.minPlayers > normalized.maxPlayers) {
             normalized.maxPlayers = normalized.minPlayers;
@@ -638,7 +1039,8 @@ function loadState() {
       tagFilter: typeof migrated.tagFilter === "string" ? migrated.tagFilter : "",
     listTagFilter: typeof migrated.listTagFilter === "string" ? migrated.listTagFilter : "",
     checklistTagFilter: typeof migrated.checklistTagFilter === "string" ? migrated.checklistTagFilter : "",
-    partyTagFilter: typeof migrated.partyTagFilter === "string" ? migrated.partyTagFilter : ""
+    partyTagFilter: typeof migrated.partyTagFilter === "string" ? migrated.partyTagFilter : "",
+    globalUndoStack: Array.isArray(migrated.globalUndoStack) ? migrated.globalUndoStack : []
   };
     if (saved !== JSON.stringify(result)) {
       localStorage.setItem(storageKey, JSON.stringify(result));
@@ -970,12 +1372,30 @@ function setRuleStatus(gameId, ruleKey, ruleIndex, status, expansionId = "") {
   if (!container) return;
   const rules = container[ruleKey];
   if (!rules || ruleIndex < 0 || ruleIndex >= rules.length) return;
+  const rule = rules[ruleIndex];
+  const beforeStatus = ruleStatus(rule);
   const currentStatus = ruleStatus(rules[ruleIndex]);
+  let newStatus;
   if (currentStatus === status) {
-    rules[ruleIndex].status = REVIEW_STATUS.UNMARKED;
+    newStatus = REVIEW_STATUS.UNMARKED;
   } else {
-    rules[ruleIndex].status = status;
+    newStatus = status;
   }
+  if (beforeStatus === newStatus) return;
+  rules[ruleIndex].status = newStatus;
+  const expLabel = expansionId ? (getExpansionById(game, expansionId)?.name || "") : "基础游戏";
+  const entry = createHistoryEntry({
+    action: HISTORY_ACTION.RULE_STATUS,
+    gameId,
+    description: `${expLabel} · ${RULE_CATEGORY_DISPLAY[ruleKey] || ruleKey}「${ruleText(rule).slice(0, 20)}${ruleText(rule).length > 20 ? "…" : ""}」状态：${REVIEW_STATUS_LABELS[beforeStatus] || "未标记"} → ${REVIEW_STATUS_LABELS[newStatus] || "未标记"}`,
+    targetType: "rule",
+    targetId: rule.id || "",
+    expansionId,
+    ruleKey,
+    before: { status: beforeStatus },
+    after: { status: newStatus }
+  });
+  pushHistoryEntry(gameId, entry);
   saveState();
 }
 
@@ -1468,6 +1888,7 @@ function renderDetail() {
       <div class="detail-actions">
         <button id="editGameBtn" type="button" class="primary">编辑</button>
         <button id="playedTodayBtn" type="button">标记今天玩过</button>
+        <button id="viewHistoryBtn" type="button">📜 变更历史</button>
         <button id="deleteGameBtn" type="button">删除桌游</button>
       </div>
     </div>
@@ -2255,7 +2676,25 @@ async function confirmBatchCovers() {
     if (!game) continue;
 
     const oldSize = estimateDataUrlSize(game.cover || "");
+    const oldCover = game.cover;
     game.cover = item.compressResult.dataUrl;
+    game.coverHistory = Array.isArray(game.coverHistory) ? game.coverHistory : [];
+    game.coverHistory.push({
+      id: generateId(),
+      cover: item.compressResult.dataUrl,
+      changedAt: new Date().toISOString(),
+      note: "批量设置封面"
+    });
+    const entry = createHistoryEntry({
+      action: HISTORY_ACTION.COVER_CHANGE,
+      gameId: game.id,
+      description: `批量更换《${game.name}》的封面`,
+      targetType: "cover",
+      targetId: "",
+      before: { cover: oldCover },
+      after: { cover: item.compressResult.dataUrl }
+    });
+    pushHistoryEntry(game.id, entry);
     const newSize = item.compressResult.compressedSize;
     totalSaved += Math.max(0, oldSize - newSize);
     updatedCount++;
@@ -2490,12 +2929,31 @@ async function addGame(event) {
     scoring: normalizeRuleArray(["确认终局计分项和即时得分项。"]),
     loanRecords: [],
     expansions: [],
-    disputeRulings: []
+    disputeRulings: [],
+    changeHistory: [],
+    coverHistory: []
   };
   for (const d of disputes) {
     ensureDisputeRulingEntry(game, ruleText(d), "");
   }
+  if (cover) {
+    game.coverHistory.push({
+      id: generateId(),
+      cover,
+      changedAt: new Date().toISOString(),
+      note: "创建桌游时上传的封面"
+    });
+  }
   state.games.unshift(game);
+  const createEntry = createHistoryEntry({
+    action: HISTORY_ACTION.GAME_CREATE,
+    gameId: game.id,
+    description: `新增桌游《${game.name}》`,
+    targetType: "game",
+    targetId: game.id,
+    after: { name: game.name, minPlayers, maxPlayers, duration: game.duration, complexity: game.complexity }
+  });
+  pushHistoryEntry(game.id, createEntry);
   state.selectedId = game.id;
   state.selectedExpansionId = "";
   els.gameForm.reset();
@@ -2620,6 +3078,19 @@ els.detailView.addEventListener("submit", (event) => {
   if (key === "disputes") {
     ensureDisputeRulingEntry(game, text, state.selectedExpansionId || "");
   }
+  const expLabel = state.selectedExpansionId ? (getExpansionById(game, state.selectedExpansionId)?.name || "") : "基础游戏";
+  const entry = createHistoryEntry({
+    action: HISTORY_ACTION.RULE_ADD,
+    gameId: game.id,
+    description: `${expLabel} · 新增${RULE_CATEGORY_DISPLAY[key] || key}：${text.slice(0, 30)}${text.length > 30 ? "…" : ""}`,
+    targetType: "rule",
+    targetId: newRule.id,
+    expansionId: state.selectedExpansionId || "",
+    ruleKey: key,
+    after: structuredClone(newRule),
+    metadata: { disputeText: key === "disputes" ? text : "" }
+  });
+  pushHistoryEntry(game.id, entry);
   renderAll();
 });
 
@@ -2669,25 +3140,64 @@ els.detailView.addEventListener("click", (event) => {
     const expansionId = ruleButton.dataset.ruleExpansion || "";
     const container = getRuleContainer(game, expansionId);
     if (container && container[key]) {
+      const deletedRule = container[key][index];
+      let deletedRulingsRef = null;
       if (key === "disputes") {
-        const disputeText = ruleText(container.disputes[index]);
+        const disputeText = ruleText(deletedRule);
         if (disputeText && Array.isArray(game.disputeRulings)) {
+          deletedRulingsRef = game.disputeRulings.filter(
+            (r) => r.disputeText === disputeText && (r.expansionId || "") === expansionId
+          );
           game.disputeRulings = game.disputeRulings.filter(
             (r) => !(r.disputeText === disputeText && (r.expansionId || "") === expansionId)
           );
         }
       }
       container[key].splice(index, 1);
+      const expLabel = expansionId ? (getExpansionById(game, expansionId)?.name || "") : "基础游戏";
+      const entry = createHistoryEntry({
+        action: HISTORY_ACTION.RULE_DELETE,
+        gameId: game.id,
+        description: `${expLabel} · 删除${RULE_CATEGORY_DISPLAY[key] || key}：${ruleText(deletedRule).slice(0, 30)}${ruleText(deletedRule).length > 30 ? "…" : ""}`,
+        targetType: "rule",
+        targetId: deletedRule?.id || "",
+        expansionId,
+        ruleKey: key,
+        before: structuredClone(deletedRule),
+        metadata: { index, deletedRulings: deletedRulingsRef, disputeText: key === "disputes" ? ruleText(deletedRule) : "" }
+      });
+      pushHistoryEntry(game.id, entry);
     }
     renderAll();
   }
 
   if (playedButton) {
+    const oldLastPlayed = game.lastPlayed;
     game.lastPlayed = new Date().toISOString().slice(0, 10);
+    const entry = createHistoryEntry({
+      action: HISTORY_ACTION.GAME_LAST_PLAYED,
+      gameId: game.id,
+      description: `标记今日玩过（${oldLastPlayed || "无记录"} → ${game.lastPlayed}）`,
+      targetType: "game",
+      targetId: game.id,
+      before: { lastPlayed: oldLastPlayed },
+      after: { lastPlayed: game.lastPlayed }
+    });
+    pushHistoryEntry(game.id, entry);
     renderAll();
   }
 
   if (deleteButton) {
+    const deletedGame = structuredClone(game);
+    const deleteEntry = createHistoryEntry({
+      action: HISTORY_ACTION.GAME_DELETE,
+      gameId: game.id,
+      description: `删除桌游《${game.name}》`,
+      targetType: "game",
+      targetId: game.id,
+      before: deletedGame
+    });
+    pushHistoryEntry(game.id, deleteEntry);
     state.games = state.games.filter((item) => item.id !== game.id);
     state.selectedId = state.games[0]?.id || "";
     state.selectedExpansionId = "";
@@ -2733,11 +3243,29 @@ els.detailView.addEventListener("click", (event) => {
     if (!rulingId || !disputeText) return;
     showConfirm(
       "删除裁定记录",
-      `确定要删除这条裁定记录吗？操作不可撤销。`,
+      "确定要删除这条裁定记录吗？可通过撤销功能恢复。",
       () => {
-        const entry = getDisputeRulingEntry(game, disputeText, expId);
-        if (entry && Array.isArray(entry.rulings)) {
-          entry.rulings = entry.rulings.filter((r) => r.id !== rulingId);
+        const rulingGroup = getDisputeRulingEntry(game, disputeText, expId);
+        let deletedRuling = null;
+        let deletedGroupEmpty = false;
+        if (rulingGroup && Array.isArray(rulingGroup.rulings)) {
+          deletedRuling = rulingGroup.rulings.find((r) => r.id === rulingId);
+          const beforeCount = rulingGroup.rulings.length;
+          rulingGroup.rulings = rulingGroup.rulings.filter((r) => r.id !== rulingId);
+          deletedGroupEmpty = beforeCount > 0 && rulingGroup.rulings.length === 0;
+        }
+        if (deletedRuling) {
+          const expLabel = expId ? (getExpansionById(game, expId)?.name || "") : "基础游戏";
+          const entry = createHistoryEntry({
+            action: HISTORY_ACTION.RULING_DELETE,
+            gameId: game.id,
+            description: `${expLabel} · 删除争议「${disputeText.slice(0, 20)}${disputeText.length > 20 ? "…" : ""}」的裁定：${deletedRuling.decision.slice(0, 20)}${deletedRuling.decision.length > 20 ? "…" : ""}`,
+            targetType: "ruling",
+            targetId: deletedRuling.id,
+            expansionId: expId,
+            before: { disputeText, ruling: structuredClone(deletedRuling), wasLastInGroup: deletedGroupEmpty }
+          });
+          pushHistoryEntry(game.id, entry);
         }
         renderAll();
         showBackupMessage("已删除裁定记录。", "success");
@@ -2779,9 +3307,26 @@ els.coverGalleryGrid.addEventListener("click", (event) => {
     if (!game) return;
     showConfirm(
       "移除封面",
-      `确定要移除《${game.name}》的封面吗？`,
+      `确定要移除《${game.name}》的封面吗？可通过撤销功能恢复。`,
       () => {
+        const oldCover = game.cover;
         game.cover = "";
+        game.coverHistory = Array.isArray(game.coverHistory) ? game.coverHistory : [];
+        game.coverHistory.push({
+          id: generateId(),
+          cover: "",
+          changedAt: new Date().toISOString(),
+          note: "移除封面"
+        });
+        const entry = createHistoryEntry({
+          action: HISTORY_ACTION.COVER_REMOVE,
+          gameId: game.id,
+          description: `移除《${game.name}》的封面`,
+          targetType: "cover",
+          targetId: "",
+          before: { cover: oldCover }
+        });
+        pushHistoryEntry(game.id, entry);
         saveState();
         renderAll();
         showBackupMessage(`已移除《${game.name}》的封面。`, "success");
@@ -2810,7 +3355,25 @@ els.coverGalleryFileInput.addEventListener("change", async (e) => {
       return;
     }
     const oldCoverSize = estimateDataUrlSize(game.cover || "");
+    const oldCover = game.cover;
     game.cover = result.dataUrl;
+    game.coverHistory = Array.isArray(game.coverHistory) ? game.coverHistory : [];
+    game.coverHistory.push({
+      id: generateId(),
+      cover: result.dataUrl,
+      changedAt: new Date().toISOString(),
+      note: "更换封面"
+    });
+    const entry = createHistoryEntry({
+      action: HISTORY_ACTION.COVER_CHANGE,
+      gameId: game.id,
+      description: `更换《${game.name}》的封面`,
+      targetType: "cover",
+      targetId: "",
+      before: { cover: oldCover },
+      after: { cover: result.dataUrl }
+    });
+    pushHistoryEntry(game.id, entry);
     saveState();
     renderAll();
     const ratio = Math.round(result.ratio * 100);
@@ -3847,14 +4410,24 @@ function submitLoan(event) {
   const expectedReturnAt = els.loanExpectedReturnInput.value;
   const notes = els.loanNotesInput.value.trim();
   if (!borrower || !borrowedAt) return;
-  game.loanRecords.push({
+  const newLoan = {
     id: crypto.randomUUID(),
     borrower,
     borrowedAt,
     expectedReturnAt,
     notes,
     returnedAt: null
+  };
+  game.loanRecords.push(newLoan);
+  const entry = createHistoryEntry({
+    action: HISTORY_ACTION.LOAN_CREATE,
+    gameId: game.id,
+    description: `借出《${game.name}》给 ${borrower}（${borrowedAt}${expectedReturnAt ? `，预计归还：${expectedReturnAt}` : ""}）`,
+    targetType: "loan",
+    targetId: newLoan.id,
+    after: structuredClone(newLoan)
   });
+  pushHistoryEntry(game.id, entry);
   closeLoanDialog();
   renderAll();
   showBackupMessage(`已将《${game.name}》借给 ${borrower}。`, "success");
@@ -3869,7 +4442,19 @@ function markReturned() {
     "标记归还",
     `确定要将《${game.name}》标记为已归还吗？`,
     () => {
-      currentLoan.returnedAt = new Date().toISOString().slice(0, 10);
+      const oldReturnedAt = currentLoan.returnedAt;
+      const newReturnedAt = new Date().toISOString().slice(0, 10);
+      currentLoan.returnedAt = newReturnedAt;
+      const entry = createHistoryEntry({
+        action: HISTORY_ACTION.LOAN_RETURN,
+        gameId: game.id,
+        description: `《${game.name}》归还（${currentLoan.borrower} · ${newReturnedAt}）`,
+        targetType: "loan",
+        targetId: currentLoan.id,
+        before: { returnedAt: oldReturnedAt },
+        after: { returnedAt: newReturnedAt }
+      });
+      pushHistoryEntry(game.id, entry);
       renderAll();
       showBackupMessage(`《${game.name}》已标记归还。`, "success");
     }
@@ -4080,6 +4665,16 @@ function addExpansion() {
   };
   if (!game.expansions) game.expansions = [];
   game.expansions.push(newExpansion);
+  const entry = createHistoryEntry({
+    action: HISTORY_ACTION.EXPANSION_ADD,
+    gameId: game.id,
+    description: `新增扩展包《${name}》`,
+    targetType: "expansion",
+    targetId: newExpansion.id,
+    expansionId: newExpansion.id,
+    after: structuredClone(newExpansion)
+  });
+  pushHistoryEntry(game.id, entry);
   els.expansionNameInput.value = "";
   state.selectedExpansionId = newExpansion.id;
   renderExpansionList();
@@ -4094,12 +4689,26 @@ function deleteExpansion(expansionId) {
   if (!expansion) return;
   showConfirm(
     "删除扩展包",
-    `确定要删除扩展包《${expansion.name}》吗？该扩展包的所有规则（包括争议裁定记录）都将被删除，操作不可撤销。`,
+    `确定要删除扩展包《${expansion.name}》吗？该扩展包的所有规则（包括争议裁定记录）都将被删除。可通过撤销功能恢复。`,
     () => {
+      const expansionSnapshot = structuredClone(expansion);
+      let deletedRulings = null;
       if (Array.isArray(game.disputeRulings)) {
+        deletedRulings = game.disputeRulings.filter((r) => (r.expansionId || "") === expansionId);
         game.disputeRulings = game.disputeRulings.filter((r) => (r.expansionId || "") !== expansionId);
       }
       game.expansions = game.expansions.filter((e) => e.id !== expansionId);
+      const entry = createHistoryEntry({
+        action: HISTORY_ACTION.EXPANSION_DELETE,
+        gameId: game.id,
+        description: `删除扩展包《${expansionSnapshot.name}》`,
+        targetType: "expansion",
+        targetId: expansionSnapshot.id,
+        expansionId: expansionSnapshot.id,
+        before: expansionSnapshot,
+        metadata: { deletedRulings }
+      });
+      pushHistoryEntry(game.id, entry);
       if (state.selectedExpansionId === expansionId) {
         state.selectedExpansionId = "";
       }
@@ -4117,7 +4726,20 @@ function renameExpansion(expansionId, newName) {
   if (!expansion) return;
   const trimmedName = newName.trim();
   if (!trimmedName) return;
+  const oldName = expansion.name;
+  if (oldName === trimmedName) return;
   expansion.name = trimmedName;
+  const entry = createHistoryEntry({
+    action: HISTORY_ACTION.EXPANSION_RENAME,
+    gameId: game.id,
+    description: `扩展包重命名：《${oldName}》→《${trimmedName}》`,
+    targetType: "expansion",
+    targetId: expansionId,
+    expansionId,
+    before: { name: oldName },
+    after: { name: trimmedName }
+  });
+  pushHistoryEntry(game.id, entry);
   saveState();
   renderDetail();
 }
@@ -4181,21 +4803,35 @@ function submitRuling(event) {
   }
 
   const expId = currentRulingExpansionId || "";
-  let entry = game.disputeRulings.find(
+  let rulingEntry = game.disputeRulings.find(
     (r) => r.disputeText === disputeText && (r.expansionId || "") === expId
   );
-  if (!entry) {
-    entry = { disputeText, expansionId: expId, rulings: [] };
-    game.disputeRulings.push(entry);
+  if (!rulingEntry) {
+    rulingEntry = { disputeText, expansionId: expId, rulings: [] };
+    game.disputeRulings.push(rulingEntry);
   }
 
-  entry.rulings.push({
+  const newRuling = {
     id: crypto.randomUUID(),
     decision,
     participants,
     date,
     notes
+  };
+  rulingEntry.rulings.push(newRuling);
+
+  const expLabel = expId ? (getExpansionById(game, expId)?.name || "") : "基础游戏";
+  const entry = createHistoryEntry({
+    action: HISTORY_ACTION.RULING_ADD,
+    gameId: game.id,
+    description: `${expLabel} · 为争议「${disputeText.slice(0, 20)}${disputeText.length > 20 ? "…" : ""}」新增裁定：${decision.slice(0, 20)}${decision.length > 20 ? "…" : ""}`,
+    targetType: "ruling",
+    targetId: newRuling.id,
+    expansionId: expId,
+    after: { disputeText, ruling: structuredClone(newRuling) },
+    metadata: { isNewGroup: !rulingEntry.rulings || rulingEntry.rulings.length === 1 }
   });
+  pushHistoryEntry(game.id, entry);
 
   closeRulingDialog();
   renderAll();
@@ -4522,6 +5158,9 @@ els.editForm.addEventListener("submit", async (e) => {
     return;
   }
 
+  const beforeGame = structuredClone(state.games[gameIndex]);
+  const coverChanged = cover !== beforeGame.cover;
+
   const updatedGame = {
     ...state.games[gameIndex],
     name,
@@ -4543,7 +5182,44 @@ els.editForm.addEventListener("submit", async (e) => {
     newContainers.push({ disputes: exp.disputes, expansionId: exp.id });
   }
   syncDisputeRulingsForGame(updatedGame, null, newContainers);
+
+  if (coverChanged) {
+    updatedGame.coverHistory = Array.isArray(updatedGame.coverHistory) ? [...updatedGame.coverHistory] : [];
+    updatedGame.coverHistory.push({
+      id: generateId(),
+      cover,
+      changedAt: new Date().toISOString(),
+      note: cover ? "更换封面" : "移除封面"
+    });
+  }
+
   state.games[gameIndex] = updatedGame;
+
+  const changedFields = [];
+  if (beforeGame.name !== name) changedFields.push("名称");
+  if (beforeGame.minPlayers !== minPlayers || beforeGame.maxPlayers !== maxPlayers) changedFields.push("人数");
+  if (beforeGame.duration !== duration) changedFields.push("时长");
+  if (beforeGame.complexity !== complexity) changedFields.push("复杂度");
+  if (beforeGame.lastPlayed !== lastPlayed) changedFields.push("游玩日期");
+  if (coverChanged) changedFields.push("封面");
+  if (JSON.stringify(beforeGame.forgets) !== JSON.stringify(editSnapshot.forgets)) changedFields.push("容易忘的规则");
+  if (JSON.stringify(beforeGame.disputes) !== JSON.stringify(editSnapshot.disputes)) changedFields.push("常见争议");
+  if (JSON.stringify(beforeGame.setup) !== JSON.stringify(editSnapshot.setup)) changedFields.push("开局准备");
+  if (JSON.stringify(beforeGame.scoring) !== JSON.stringify(editSnapshot.scoring)) changedFields.push("计分提醒");
+  if (JSON.stringify(beforeGame.expansions) !== JSON.stringify(editSnapshot.expansions)) changedFields.push("扩展包");
+
+  if (changedFields.length > 0) {
+    const batchEntry = createHistoryEntry({
+      action: HISTORY_ACTION.BATCH_EDIT,
+      gameId: beforeGame.id,
+      description: `批量编辑：${changedFields.join("、")}`,
+      targetType: "game",
+      targetId: beforeGame.id,
+      before: beforeGame,
+      after: structuredClone(updatedGame)
+    });
+    pushHistoryEntry(beforeGame.id, batchEntry);
+  }
 
   closeEditDialog();
   renderAll();
@@ -4563,7 +5239,365 @@ els.detailView.addEventListener("click", (event) => {
   if (editButton) {
     openEditDialog();
   }
+  const historyButton = event.target.closest("#viewHistoryBtn");
+  if (historyButton) {
+    openTimelineDialog();
+  }
 });
+
+function openUndoDialog() {
+  if (!els.undoDialog) return;
+  if (!Array.isArray(state.globalUndoStack) || state.globalUndoStack.length === 0) {
+    showBackupMessage("暂无最近操作可撤销。", "error");
+    return;
+  }
+  els.undoSelectedEntryId = null;
+  renderUndoList();
+  els.undoDialogConfirmBtn.disabled = true;
+  els.undoDialog.classList.remove("hidden");
+}
+
+function closeUndoDialog() {
+  if (!els.undoDialog) return;
+  els.undoDialog.classList.add("hidden");
+  els.undoSelectedEntryId = null;
+}
+
+function renderUndoList() {
+  if (!els.undoList) return;
+  const stack = Array.isArray(state.globalUndoStack) ? [...state.globalUndoStack].reverse() : [];
+  if (stack.length === 0) {
+    els.undoList.innerHTML = `<p class="undo-empty">暂无最近操作记录。</p>`;
+    return;
+  }
+  els.undoList.innerHTML = stack.map((entry, idx) => {
+    const game = state.games.find((g) => g.id === entry.gameId);
+    const gameName = game ? game.name : "(已删除)";
+    const isLatest = idx === 0;
+    const undoable = canUndoEntry(entry);
+    const selected = els.undoSelectedEntryId === entry.id ? "selected" : "";
+    return `
+      <div class="undo-item ${selected} ${!undoable ? "disabled" : ""}"
+           data-entry-id="${entry.id}" data-undoable="${undoable ? "1" : "0"}">
+        <div class="undo-item-head">
+          <span class="undo-action-icon">${HISTORY_ACTION_LABELS[entry.action]?.emoji || "📝"}</span>
+          <span class="undo-action-name">${HISTORY_ACTION_LABELS[entry.action]?.label || entry.action}</span>
+          ${isLatest ? `<span class="undo-latest-badge">最新</span>` : ""}
+          ${!undoable ? `<span class="undo-no-badge" title="此操作不支持撤销">不可撤销</span>` : ""}
+        </div>
+        <div class="undo-item-desc">${escapeHtml(entry.description || "")}</div>
+        <div class="undo-item-meta">
+          <span>🎮 ${escapeHtml(gameName)}</span>
+          <span>🕒 ${formatHistoryTimestamp(entry.timestamp)}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+  if (els.undoList) {
+    els.undoList.querySelectorAll(".undo-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        const eid = el.dataset.entryId;
+        const undoable = el.dataset.undoable === "1";
+        if (!undoable) return;
+        els.undoSelectedEntryId = eid;
+        els.undoList.querySelectorAll(".undo-item").forEach((it) => it.classList.remove("selected"));
+        el.classList.add("selected");
+        els.undoDialogConfirmBtn.disabled = false;
+      });
+    });
+  }
+}
+
+function executeSelectedUndo() {
+  if (!els.undoSelectedEntryId) return;
+  const entry = state.globalUndoStack.find((e) => e.id === els.undoSelectedEntryId);
+  if (!entry) return;
+  const idx = state.globalUndoStack.indexOf(entry);
+  const doUndo = () => {
+    try {
+      const success = undoHistoryEntry(entry);
+      if (success) {
+        state.globalUndoStack = state.globalUndoStack.filter((e) => e.id !== entry.id);
+        saveState();
+        closeUndoDialog();
+        renderAll();
+        showBackupMessage(`已撤销操作：${entry.description}`, "success");
+      } else {
+        showBackupMessage("撤销操作失败，请检查数据状态。", "error");
+      }
+    } catch (err) {
+      console.error("撤销错误:", err);
+      showBackupMessage(`撤销失败：${err.message || "未知错误"}`, "error");
+    }
+  };
+  if (idx !== state.globalUndoStack.length - 1) {
+    showConfirm("非最新操作", "您选择的不是最近的操作，中间的操作可能会受影响。是否继续？", doUndo);
+  } else {
+    doUndo();
+  }
+}
+
+function openTimelineDialog() {
+  if (!els.historyTimelineDialog) return;
+  const game = state.games.find((g) => g.id === state.selectedId);
+  if (!game) return;
+  els.historyTimelineTitle.textContent = `📜 《${game.name}》变更时间线`;
+  renderTimeline(game.id);
+  els.historyTimelineDialog.classList.remove("hidden");
+}
+
+function closeTimelineDialog() {
+  if (!els.historyTimelineDialog) return;
+  els.historyTimelineDialog.classList.add("hidden");
+}
+
+function renderTimeline(gameId) {
+  if (!els.historyTimelineList || !els.historyTimelineEmpty) return;
+  const history = getGameHistory(gameId);
+  if (!history || history.length === 0) {
+    els.historyTimelineEmpty.classList.remove("hidden");
+    els.historyTimelineList.innerHTML = "";
+    return;
+  }
+  els.historyTimelineEmpty.classList.add("hidden");
+  const sorted = [...history].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  els.historyTimelineList.innerHTML = sorted.map((entry) => {
+    const undoable = canUndoEntry(entry);
+    const isRule = entry.targetType === "rule";
+    const isExp = entry.targetType === "expansion";
+    const canRestoreRule = isRule && (entry.action === HISTORY_ACTION.RULE_DELETE ||
+      entry.action === HISTORY_ACTION.RULE_UPDATE);
+    const canRestoreExp = isExp && (entry.action === HISTORY_ACTION.EXPANSION_DELETE ||
+      entry.action === HISTORY_ACTION.EXPANSION_ADD ||
+      entry.action === HISTORY_ACTION.EXPANSION_RENAME);
+    return `
+      <div class="timeline-item ${HISTORY_ACTION_LABELS[entry.action]?.cssClass || ""}">
+        <div class="timeline-dot" title="${HISTORY_ACTION_LABELS[entry.action]?.label || entry.action}">
+          ${HISTORY_ACTION_LABELS[entry.action]?.emoji || "📝"}
+        </div>
+        <div class="timeline-content">
+          <div class="timeline-head">
+            <strong class="timeline-action">${HISTORY_ACTION_LABELS[entry.action]?.label || entry.action}</strong>
+            <span class="timeline-time">${formatHistoryTimestamp(entry.timestamp)}</span>
+          </div>
+          <div class="timeline-desc">${escapeHtml(entry.description || "")}</div>
+          <div class="timeline-actions">
+            ${undoable && state.globalUndoStack.some((e) => e.id === entry.id) ? `<button type="button" class="timeline-btn secondary timeline-undo" data-entry-id="${entry.id}">↩️ 撤销</button>` : ""}
+            ${canRestoreRule ? `<button type="button" class="timeline-btn primary timeline-restore-rule" data-entry-id="${entry.id}" title="从历史版本恢复这条规则">恢复规则</button>` : ""}
+            ${canRestoreExp ? `<button type="button" class="timeline-btn primary timeline-restore-exp" data-entry-id="${entry.id}" title="从历史版本恢复这个扩展包">恢复扩展包</button>` : ""}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+  if (els.historyTimelineList) {
+    els.historyTimelineList.querySelectorAll(".timeline-undo").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.entryId;
+        const entry = state.globalUndoStack.find((e) => e.id === id);
+        if (!entry) {
+          showBackupMessage("此操作已不在撤销栈中，无法撤销。", "error");
+          return;
+        }
+        els.undoSelectedEntryId = id;
+        closeTimelineDialog();
+        executeSelectedUndo();
+      });
+    });
+    els.historyTimelineList.querySelectorAll(".timeline-restore-rule").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.entryId;
+        const history = getGameHistory(gameId);
+        const entry = history.find((e) => e.id === id);
+        if (!entry) return;
+        openRestoreRuleDialog(entry);
+      });
+    });
+    els.historyTimelineList.querySelectorAll(".timeline-restore-exp").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.entryId;
+        const history = getGameHistory(gameId);
+        const entry = history.find((e) => e.id === id);
+        if (!entry) return;
+        openRestoreExpansionDialog(entry);
+      });
+    });
+  }
+}
+
+function openRestoreRuleDialog(entry) {
+  if (!els.historyRestoreDialog) return;
+  const rule = entry.action === HISTORY_ACTION.RULE_DELETE ? entry.before : (entry.before || entry.after);
+  const ruleKey = entry.ruleKey;
+  const category = RULE_CATEGORY_DISPLAY[ruleKey] || ruleKey;
+  const expId = entry.expansionId || "";
+  const game = state.games.find((g) => g.id === entry.gameId);
+  const expLabel = expId ? (getExpansionById(game, expId)?.name || "未知扩展包") : "基础游戏";
+  els.pendingRestoreEntry = { type: "rule", entry };
+  els.historyRestoreDialogTitle.textContent = `📜 恢复${category}确认`;
+  els.historyRestoreContent.innerHTML = `
+    <div class="restore-info">
+      <p><strong>所属位置：</strong>${escapeHtml(expLabel)}</p>
+      <p><strong>规则分类：</strong>${category}</p>
+      <p><strong>操作时间：</strong>${formatHistoryTimestamp(entry.timestamp)}</p>
+    </div>
+    <div class="restore-preview">
+      <h4>规则内容预览：</h4>
+      <div class="restore-rule-preview">
+        <div class="rule-text">${escapeHtml(rule?.text || ruleText(rule || {}))}</div>
+        ${rule?.tags?.length ? renderTagChips(rule.tags) : ""}
+        ${rule?.status && rule.status !== "unmarked" ? `<div class="rule-status-preview">状态：${REVIEW_STATUS_LABELS[rule.status] || rule.status}</div>` : ""}
+      </div>
+    </div>
+    <div class="restore-warning">⚠️ 恢复后将添加为一条新规则，现有规则不会被覆盖。</div>
+  `;
+  els.historyRestoreDialog.classList.remove("hidden");
+}
+
+function openRestoreExpansionDialog(entry) {
+  if (!els.historyRestoreDialog) return;
+  const expansion = entry.action === HISTORY_ACTION.EXPANSION_DELETE ? entry.before :
+    (entry.action === HISTORY_ACTION.EXPANSION_RENAME ? { ...entry.before, name: entry.after?.name || entry.before?.name } :
+      (entry.before || entry.after));
+  const game = state.games.find((g) => g.id === entry.gameId);
+  const exists = game && game.expansions?.some((e) => e.id === expansion?.id);
+  els.pendingRestoreEntry = { type: "expansion", entry };
+  els.historyRestoreDialogTitle.textContent = `📜 恢复扩展包确认`;
+  const ruleCount = expansion ? (
+    (expansion.forgets?.length || 0) + (expansion.disputes?.length || 0) +
+    (expansion.setup?.length || 0) + (expansion.scoring?.length || 0)
+  ) : 0;
+  els.historyRestoreContent.innerHTML = `
+    <div class="restore-info">
+      <p><strong>扩展包名称：</strong>${escapeHtml(expansion?.name || "(无)")}</p>
+      <p><strong>操作时间：</strong>${formatHistoryTimestamp(entry.timestamp)}</p>
+      <p><strong>规则总数：</strong>${ruleCount} 条</p>
+      ${exists ? '<p class="restore-warn">⚠️ 检测到同名扩展包 ID 已存在，将重命名恢复的扩展包。</p>' : ""}
+    </div>
+    <div class="restore-preview">
+      <h4>扩展包结构预览：</h4>
+      <ul class="restore-exp-list">
+        <li>容易忘的规则：${expansion?.forgets?.length || 0} 条</li>
+        <li>常见争议：${expansion?.disputes?.length || 0} 条</li>
+        <li>开局准备：${expansion?.setup?.length || 0} 条</li>
+        <li>计分提醒：${expansion?.scoring?.length || 0} 条</li>
+      </ul>
+    </div>
+    <div class="restore-warning">⚠️ 恢复后将作为独立扩展包添加，不会覆盖现有扩展包。</div>
+  `;
+  els.historyRestoreDialog.classList.remove("hidden");
+}
+
+function closeRestoreDialog() {
+  if (!els.historyRestoreDialog) return;
+  els.historyRestoreDialog.classList.add("hidden");
+  els.pendingRestoreEntry = null;
+}
+
+function executeRestore() {
+  const pending = els.pendingRestoreEntry;
+  if (!pending) return;
+  const entry = pending.entry;
+  const game = state.games.find((g) => g.id === entry.gameId);
+  if (!game) {
+    showBackupMessage("所属桌游不存在，无法恢复。", "error");
+    closeRestoreDialog();
+    return;
+  }
+  if (pending.type === "rule") {
+    const rule = entry.action === HISTORY_ACTION.RULE_DELETE ? structuredClone(entry.before) :
+      structuredClone(entry.before || entry.after);
+    const ruleKey = entry.ruleKey;
+    const expId = entry.expansionId || "";
+    const container = getRuleContainer(game, expId);
+    if (!container || !container[ruleKey]) {
+      showBackupMessage("规则容器不存在，无法恢复。", "error");
+      closeRestoreDialog();
+      return;
+    }
+    if (rule && !rule.id) rule.id = generateId();
+    if (rule) rule.status = rule.status || REVIEW_STATUS.UNMARKED;
+    container[ruleKey].push(rule);
+    if (ruleKey === "disputes") {
+      const text = ruleText(rule);
+      if (text) ensureDisputeRulingEntry(game, text, expId);
+    }
+    saveState();
+    closeRestoreDialog();
+    renderAll();
+    renderTimeline(game.id);
+    showBackupMessage(`已恢复规则：${ruleText(rule).slice(0, 30)}`, "success");
+  } else if (pending.type === "expansion") {
+    let expansion = entry.action === HISTORY_ACTION.EXPANSION_DELETE ? structuredClone(entry.before) :
+      (entry.action === HISTORY_ACTION.EXPANSION_RENAME ? structuredClone(entry.before || entry.after) :
+        structuredClone(entry.before || entry.after));
+    if (!expansion) {
+      showBackupMessage("扩展包数据损坏，无法恢复。", "error");
+      closeRestoreDialog();
+      return;
+    }
+    expansion.id = generateId();
+    const baseName = expansion.name || "未命名扩展包";
+    const existingNames = game.expansions?.map((e) => e.name) || [];
+    let finalName = baseName;
+    let idx = 2;
+    while (existingNames.includes(finalName)) {
+      finalName = `${baseName}（已恢复${idx}）`;
+      idx++;
+    }
+    expansion.name = finalName;
+    if (!Array.isArray(game.expansions)) game.expansions = [];
+    game.expansions.push(expansion);
+    if (entry.metadata?.deletedRulings && Array.isArray(entry.metadata.deletedRulings) && Array.isArray(game.disputeRulings)) {
+      game.disputeRulings.push(...structuredClone(entry.metadata.deletedRulings));
+    }
+    saveState();
+    closeRestoreDialog();
+    renderAll();
+    renderTimeline(game.id);
+    showBackupMessage(`已恢复扩展包《${finalName}》`, "success");
+  }
+}
+
+if (els.undoBtn) {
+  els.undoBtn.addEventListener("click", openUndoDialog);
+}
+if (els.undoDialogCloseBtn) {
+  els.undoDialogCloseBtn.addEventListener("click", closeUndoDialog);
+}
+if (els.undoDialogCancelBtn) {
+  els.undoDialogCancelBtn.addEventListener("click", closeUndoDialog);
+}
+if (els.undoDialog) {
+  els.undoDialog.addEventListener("click", (e) => {
+    if (e.target === els.undoDialog) closeUndoDialog();
+  });
+}
+if (els.undoDialogConfirmBtn) {
+  els.undoDialogConfirmBtn.addEventListener("click", executeSelectedUndo);
+}
+if (els.historyTimelineCloseBtn) {
+  els.historyTimelineCloseBtn.addEventListener("click", closeTimelineDialog);
+}
+if (els.historyTimelineDialog) {
+  els.historyTimelineDialog.addEventListener("click", (e) => {
+    if (e.target === els.historyTimelineDialog) closeTimelineDialog();
+  });
+}
+if (els.historyRestoreDialogCancelBtn) {
+  els.historyRestoreDialogCancelBtn.addEventListener("click", closeRestoreDialog);
+}
+if (els.historyRestoreDialogConfirmBtn) {
+  els.historyRestoreDialogConfirmBtn.addEventListener("click", executeRestore);
+}
+if (els.historyRestoreDialogCloseBtn) {
+  els.historyRestoreDialogCloseBtn.addEventListener("click", closeRestoreDialog);
+}
+if (els.historyRestoreDialog) {
+  els.historyRestoreDialog.addEventListener("click", (e) => {
+    if (e.target === els.historyRestoreDialog) closeRestoreDialog();
+  });
+}
 
 const PARTY_COMPLEXITY = ["轻", "中", "重"];
 const PARTY_DEFAULT_PLAYER_NAMES = ["玩家一", "玩家二", "玩家三", "玩家四", "玩家五", "玩家六", "玩家七", "玩家八"];
