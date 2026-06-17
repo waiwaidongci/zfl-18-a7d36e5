@@ -27,24 +27,24 @@ const HISTORY_ACTION = {
 };
 
 const HISTORY_ACTION_LABELS = {
-  [HISTORY_ACTION.GAME_CREATE]: "🎮 新增桌游",
-  [HISTORY_ACTION.GAME_DELETE]: "🗑️ 删除桌游",
-  [HISTORY_ACTION.GAME_UPDATE]: "✏️ 修改桌游信息",
-  [HISTORY_ACTION.GAME_LAST_PLAYED]: "🎲 标记玩过",
-  [HISTORY_ACTION.RULE_ADD]: "➕ 新增规则",
-  [HISTORY_ACTION.RULE_DELETE]: "➖ 删除规则",
-  [HISTORY_ACTION.RULE_UPDATE]: "📝 修改规则",
-  [HISTORY_ACTION.RULE_STATUS]: "🏷️ 更新复习状态",
-  [HISTORY_ACTION.EXPANSION_ADD]: "🧩 新增扩展包",
-  [HISTORY_ACTION.EXPANSION_DELETE]: "🧹 删除扩展包",
-  [HISTORY_ACTION.EXPANSION_RENAME]: "✏️ 重命名扩展包",
-  [HISTORY_ACTION.RULING_ADD]: "⚖️ 新增裁定",
-  [HISTORY_ACTION.RULING_DELETE]: "❌ 删除裁定",
-  [HISTORY_ACTION.LOAN_CREATE]: "📤 借出桌游",
-  [HISTORY_ACTION.LOAN_RETURN]: "📥 归还桌游",
-  [HISTORY_ACTION.COVER_CHANGE]: "🖼️ 更新封面",
-  [HISTORY_ACTION.COVER_REMOVE]: "🏞️ 移除封面",
-  [HISTORY_ACTION.BATCH_EDIT]: "📦 批量编辑保存"
+  [HISTORY_ACTION.GAME_CREATE]: { emoji: "🎮", label: "新增桌游", cssClass: "game_create" },
+  [HISTORY_ACTION.GAME_DELETE]: { emoji: "🗑️", label: "删除桌游", cssClass: "game_delete" },
+  [HISTORY_ACTION.GAME_UPDATE]: { emoji: "✏️", label: "修改桌游信息", cssClass: "game_update" },
+  [HISTORY_ACTION.GAME_LAST_PLAYED]: { emoji: "🎲", label: "标记玩过", cssClass: "game_last_played" },
+  [HISTORY_ACTION.RULE_ADD]: { emoji: "➕", label: "新增规则", cssClass: "rule_add" },
+  [HISTORY_ACTION.RULE_DELETE]: { emoji: "➖", label: "删除规则", cssClass: "rule_delete" },
+  [HISTORY_ACTION.RULE_UPDATE]: { emoji: "📝", label: "修改规则", cssClass: "rule_update" },
+  [HISTORY_ACTION.RULE_STATUS]: { emoji: "🏷️", label: "更新复习状态", cssClass: "rule_status" },
+  [HISTORY_ACTION.EXPANSION_ADD]: { emoji: "🧩", label: "新增扩展包", cssClass: "expansion_add" },
+  [HISTORY_ACTION.EXPANSION_DELETE]: { emoji: "🧹", label: "删除扩展包", cssClass: "expansion_delete" },
+  [HISTORY_ACTION.EXPANSION_RENAME]: { emoji: "✏️", label: "重命名扩展包", cssClass: "expansion_rename" },
+  [HISTORY_ACTION.RULING_ADD]: { emoji: "⚖️", label: "新增裁定", cssClass: "ruling_add" },
+  [HISTORY_ACTION.RULING_DELETE]: { emoji: "❌", label: "删除裁定", cssClass: "ruling_delete" },
+  [HISTORY_ACTION.LOAN_CREATE]: { emoji: "📤", label: "借出桌游", cssClass: "loan_create" },
+  [HISTORY_ACTION.LOAN_RETURN]: { emoji: "📥", label: "归还桌游", cssClass: "loan_return" },
+  [HISTORY_ACTION.COVER_CHANGE]: { emoji: "🖼️", label: "更新封面", cssClass: "cover_change" },
+  [HISTORY_ACTION.COVER_REMOVE]: { emoji: "🏞️", label: "移除封面", cssClass: "cover_remove" },
+  [HISTORY_ACTION.BATCH_EDIT]: { emoji: "📦", label: "批量编辑保存", cssClass: "batch_edit" }
 };
 
 const RULE_CATEGORY_DISPLAY = {
@@ -4728,7 +4728,9 @@ function renameExpansion(expansionId, newName) {
   if (!trimmedName) return;
   const oldName = expansion.name;
   if (oldName === trimmedName) return;
+  const beforeExpansion = structuredClone(expansion);
   expansion.name = trimmedName;
+  const afterExpansion = structuredClone(expansion);
   const entry = createHistoryEntry({
     action: HISTORY_ACTION.EXPANSION_RENAME,
     gameId: game.id,
@@ -4736,8 +4738,8 @@ function renameExpansion(expansionId, newName) {
     targetType: "expansion",
     targetId: expansionId,
     expansionId,
-    before: { name: oldName },
-    after: { name: trimmedName }
+    before: beforeExpansion,
+    after: afterExpansion
   });
   pushHistoryEntry(game.id, entry);
   saveState();
@@ -5265,7 +5267,7 @@ function closeUndoDialog() {
 
 function renderUndoList() {
   if (!els.undoList) return;
-  const stack = Array.isArray(state.globalUndoStack) ? [...state.globalUndoStack].reverse() : [];
+  const stack = Array.isArray(state.globalUndoStack) ? [...state.globalUndoStack] : [];
   if (stack.length === 0) {
     els.undoList.innerHTML = `<p class="undo-empty">暂无最近操作记录。</p>`;
     return;
@@ -5274,7 +5276,7 @@ function renderUndoList() {
     const game = state.games.find((g) => g.id === entry.gameId);
     const gameName = game ? game.name : "(已删除)";
     const isLatest = idx === 0;
-    const undoable = canUndoEntry(entry);
+    const undoable = isLatest && canUndoEntry(entry);
     const selected = els.undoSelectedEntryId === entry.id ? "selected" : "";
     return `
       <div class="undo-item ${selected} ${!undoable ? "disabled" : ""}"
@@ -5283,7 +5285,7 @@ function renderUndoList() {
           <span class="undo-action-icon">${HISTORY_ACTION_LABELS[entry.action]?.emoji || "📝"}</span>
           <span class="undo-action-name">${HISTORY_ACTION_LABELS[entry.action]?.label || entry.action}</span>
           ${isLatest ? `<span class="undo-latest-badge">最新</span>` : ""}
-          ${!undoable ? `<span class="undo-no-badge" title="此操作不支持撤销">不可撤销</span>` : ""}
+          ${!undoable ? `<span class="undo-no-badge" title="${isLatest ? "此操作不支持撤销" : "只能撤销最新操作"}">${isLatest ? "不可撤销" : "非最新"}</span>` : ""}
         </div>
         <div class="undo-item-desc">${escapeHtml(entry.description || "")}</div>
         <div class="undo-item-meta">
@@ -5313,6 +5315,10 @@ function executeSelectedUndo() {
   const entry = state.globalUndoStack.find((e) => e.id === els.undoSelectedEntryId);
   if (!entry) return;
   const idx = state.globalUndoStack.indexOf(entry);
+  if (idx !== 0) {
+    showBackupMessage("只能撤销最近一次操作，请先处理更新的记录。", "error");
+    return;
+  }
   const doUndo = () => {
     try {
       const success = undoHistoryEntry(entry);
@@ -5330,11 +5336,7 @@ function executeSelectedUndo() {
       showBackupMessage(`撤销失败：${err.message || "未知错误"}`, "error");
     }
   };
-  if (idx !== state.globalUndoStack.length - 1) {
-    showConfirm("非最新操作", "您选择的不是最近的操作，中间的操作可能会受影响。是否继续？", doUndo);
-  } else {
-    doUndo();
-  }
+  doUndo();
 }
 
 function openTimelineDialog() {
@@ -5457,7 +5459,7 @@ function openRestoreRuleDialog(entry) {
 function openRestoreExpansionDialog(entry) {
   if (!els.historyRestoreDialog) return;
   const expansion = entry.action === HISTORY_ACTION.EXPANSION_DELETE ? entry.before :
-    (entry.action === HISTORY_ACTION.EXPANSION_RENAME ? { ...entry.before, name: entry.after?.name || entry.before?.name } :
+    (entry.action === HISTORY_ACTION.EXPANSION_RENAME ? (entry.after || entry.before) :
       (entry.before || entry.after));
   const game = state.games.find((g) => g.id === entry.gameId);
   const exists = game && game.expansions?.some((e) => e.id === expansion?.id);
@@ -5529,7 +5531,7 @@ function executeRestore() {
     showBackupMessage(`已恢复规则：${ruleText(rule).slice(0, 30)}`, "success");
   } else if (pending.type === "expansion") {
     let expansion = entry.action === HISTORY_ACTION.EXPANSION_DELETE ? structuredClone(entry.before) :
-      (entry.action === HISTORY_ACTION.EXPANSION_RENAME ? structuredClone(entry.before || entry.after) :
+      (entry.action === HISTORY_ACTION.EXPANSION_RENAME ? structuredClone(entry.after || entry.before) :
         structuredClone(entry.before || entry.after));
     if (!expansion) {
       showBackupMessage("扩展包数据损坏，无法恢复。", "error");
