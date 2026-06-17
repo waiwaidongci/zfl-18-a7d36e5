@@ -2,8 +2,20 @@
   "name": "zfl18-boardgame-rule-cards",
   "version": "1.0.0",
   "description": "桌游规则卡片管理 - 数据迁移与导入测试",
+  "private": true,
   "scripts": {
-    "test": "node test.js"
+    "test": "node test.js",
+    "check:dom": "node scripts/check-dom.js",
+    "check:js": "node scripts/check-js.js",
+    "check:css": "node scripts/check-css.js",
+    "check": "npm run check:dom && npm run check:js && npm run check:css",
+    "e2e": "node scripts/e2e-check.mjs",
+    "lint": "npm run check && npm run test",
+    "serve": "npx serve -l 3000 ."
+  },
+  "devDependencies": {
+    "acorn": "^8.14.0",
+    "playwright": "^1.52.0"
   },
   "engines": {
     "node": ">=16"
