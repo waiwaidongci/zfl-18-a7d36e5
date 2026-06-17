@@ -4134,6 +4134,13 @@ function executeImport(importItems, globalStrategy, individualStrategies) {
     processedNames.add(key);
     if (item.status === IMPORT_ITEM_STATUS.SKIP) {
       processedGames.push({ ...item.localGame });
+      idMappings.gameIdMap[item.importGame.id] = item.localGame.id;
+      for (const exp of (item.localGame.expansions || [])) {
+        const importExp = (item.importGame.expansions || []).find((ie) => ie.name.trim().toLowerCase() === exp.name.trim().toLowerCase());
+        if (importExp) {
+          idMappings.expansionIdMap[importExp.id] = exp.id;
+        }
+      }
       continue;
     }
     if (item.status === IMPORT_ITEM_STATUS.NEW) {
